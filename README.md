@@ -1,19 +1,11 @@
 # Gran Turismo 7 UDP proxy for XSim and others....
 
 
-All the credits go to Nenkai to the guys at GTPlanet that all contributed to analyze/share/decrypt data:
-Nenkai https://github.com/Nenkai/PDTools/tree/master/PDTools.SimulatorInterface
-Thaks to @Bornhall and @gt7coder on GTPlanet forum too !
+All the credits go to guys at GTPlanet that all contributed to analyze/share/decrypt data:
+@Nenkai https://github.com/Nenkai/PDTools/tree/master/PDTools.SimulatorInterface and also @Bornhall and @gt7coder on GTPlanet forum too ! And others...
 
 Keep in mind that this is an undocumented API from Grand Turismo Series, the game developer
 might patch the game and close the door in the future.
-
--------------------
-
-To run the app download the latest release from:
-https://github.com/
-
--------------------
 
 To run the script via Python, you need to have at least the version 3.9 installed.
 Clone this repository and install all dependencies:
@@ -21,7 +13,6 @@ pip install -r requirements.txt
 
 Then runn the proxy with at least one argument representing the PlayStation/Whatever IP:
 python GT7Proxy.py --ps_ip myps.local 
-
 
 Detailed usage:
 usage: GT7Proxy.py [-h] --ps_ip PS_IP [--xsim_ip XSIM_IP] [--xsim_port XSIM_PORT] [--logpackets LOGPACKETS] [--csvoutput CSVOUTPUT] [--silent SILENT]
