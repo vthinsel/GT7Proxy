@@ -343,12 +343,12 @@ while True:
 								telemetry.rpm,
 								telemetry.max_alert_rpm,
 								cgear,
-								telemetry.rotation_x, # should be roll
-								telemetry.rotation_y, # shoulb be pitch
-								telemetry.rotation_z, # should be yaw
-								accel_x , # should be surge
-								accel_y , # should be sway
-								accel_z , # should be heave
+								telemetry.rotation_x, # roll
+								telemetry.rotation_y, # yaw
+								telemetry.rotation_z, # pitch
+								accel_x , # surge
+								accel_y , # heave
+								accel_z , # sway
 								0, # Traction Loss
 								telemetry.oil_temperature,
 								telemetry.oil_pressure_bar,
