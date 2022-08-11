@@ -18,7 +18,12 @@ Clone this repository and install all dependencies:
 pip install -r requirements.txt
 
 Then run the proxy with at least one argument representing the PlayStation/Whatever IP:
-python GT7Proxy.py --ps_ip myps.local 
+
+``python GT7Proxy.py --ps_ip 192.168.1.10``
+
+Or
+
+``python GT7Proxy.py --ps_ip mipsipaddress.local``
 
 ## Detailed usage
 
