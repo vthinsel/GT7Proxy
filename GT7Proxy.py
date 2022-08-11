@@ -374,7 +374,20 @@ while True:
 								telemetry.road_plane_y,
 								telemetry.road_plane_z,								
 								telemetry.unknown_single1,
-								telemetry.unknown_single4
+								telemetry.unknown_single4,
+								telemetry.fuel_level,
+								telemetry.fuel_capacity,
+								telemetry.current_lap,
+								telemetry.total_laps,
+								telemetry.best_lap_time,
+								telemetry.last_lap_time,
+								telemetry.pre_race_start_position,
+								telemetry.pre_race_num_cars,
+								telemetry.boost,
+								telemetry.susp_height_FL,
+								telemetry.susp_height_FR,
+								telemetry.susp_height_RL,
+								telemetry.susp_height_RR,
 								)
 			try:
 				xsim_socket.sendto(xsim_packet, xsim_client_address)
