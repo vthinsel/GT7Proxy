@@ -1,5 +1,6 @@
 import argparse
 import csv
+from math import atan2, cos, sin
 import signal
 from datetime import datetime as dt
 from datetime import timedelta as td
@@ -72,6 +73,11 @@ parser.add_argument("--silent",
                     type=bool,
                     default=False,
                     help="limit console output to most usefull data for dashboard. Default is False")
+
+parser.add_argument("--xsimoutput",
+                    type=bool,
+                    default=True,
+                    help="Do not send outout to Xsim")
 
 args = parser.parse_args()
 
@@ -275,12 +281,14 @@ if args.logpackets:
 if args.csvoutput:
 	csvfile=open("GT7data.csv",'w', newline='')
 	csvwriter = csv.writer(csvfile)
+	csvfilexsim=open("GT7dataXsim.csv",'w', newline='')
+	csvwriterxsim = csv.writer(csvfilexsim)
 delta = 0
 udppackets = 0
 lapcounter = LapCounter()
-previous_velocity_x = 0
-previous_velocity_y = 0
-previous_velocity_z = 0
+previous_local_velocity_x = 0
+previous_local_velocity_y = 0
+previous_local_velocity_z = 0
 accel_x = 0
 accel_y = 0
 accel_z = 0
@@ -300,11 +308,6 @@ while True:
 		ddata = salsa20_dec(data)
 		#ts = datetime.datetime.now()
 		telemetry = GTDataPacket(ddata[0:296])
-		if args.csvoutput:
-			if csvheader:
-				csvwriter.writerow(telemetry.__dict__.keys())
-				csvheader = False
-			csvwriter.writerow(telemetry)
 		if len(ddata) > 0 and telemetry.pkt_id > pktid:
 			pktid = telemetry.pkt_id
 			bstlap = telemetry.best_lap_time
@@ -326,13 +329,26 @@ while True:
 			else:
 				curLapTime = 0
 				printAt('{:>9}'.format(''), 7, 49)
+			# https://gamedev.stackexchange.com/questions/79765/how-do-i-convert-from-the-global-coordinate-space-to-a-local-space
+			# We need to turn world velocity(x,y,z) to local velocity (x1,y1,z1)
+			angle=atan2(telemetry.velocity_x,telemetry.velocity_z)
+			local_velocity_x=sin(angle)*telemetry.velocity_x+cos(angle)*telemetry.velocity_z # Surge
+			
+			local_velocity_y = cos(angle)*telemetry.velocity_x-sin(angle)*telemetry.velocity_z # Heave
+			local_velocity_z = sin(angle)*telemetry.velocity_x+cos(angle)*telemetry.velocity_z # Sway
+			
+			local_velocity_y = 0
+			local_velocity_z = 0
+			
+			
 			if delta.microseconds != 0:
-				accel_x=(telemetry.velocity_x - previous_velocity_x )*1000000 / delta.microseconds
-				accel_y=(telemetry.velocity_y - previous_velocity_y )*1000000 / delta.microseconds
-				accel_z=(telemetry.velocity_z - previous_velocity_z )*1000000 / delta.microseconds
-			previous_velocity_x=telemetry.velocity_x
-			previous_velocity_y=telemetry.velocity_y
-			previous_velocity_z=telemetry.velocity_z
+				accel_x=(local_velocity_x - previous_local_velocity_x )*1000000 / delta.microseconds
+				accel_y=(local_velocity_y - previous_local_velocity_y )*1000000 / delta.microseconds
+				accel_z=(local_velocity_z - previous_local_velocity_z )*1000000 / delta.microseconds
+			previous_local_velocity_x=local_velocity_x
+			previous_local_velocity_y=local_velocity_y
+			previous_local_velocity_z=local_velocity_z
+			
 			xsim_packet = TelemetryPacket(PACKET_HEADER,
 								API_VERSION,
 								str.encode("PS_GT7"),
@@ -353,7 +369,7 @@ while True:
 								telemetry.oil_temperature,
 								telemetry.oil_pressure_bar,
 								telemetry.water_temperature,
-								telemetry.flags & 0b0000000000000010, #game paused ?
+								telemetry.flags & 0b0000000000000010, # game paused ?
 								telemetry.flags & 0b0000000000000001, # on track ?
 								telemetry.flags & 0b0000000000010000, # rev limit active ?
 								telemetry.flags & 0b0000000000100000, # Handbrake active ?
@@ -388,14 +404,26 @@ while True:
 								telemetry.susp_height_FR,
 								telemetry.susp_height_RL,
 								telemetry.susp_height_RR,
+								telemetry.flags & 0b0000000001000000, # Lights on
+								local_velocity_x,
+								local_velocity_y,
+								local_velocity_z,
 								)
+			if args.csvoutput:
+				if csvheader:
+					csvwriter.writerow(telemetry.__dict__.keys())
+					csvwriterxsim.writerow(xsim_packet.__dict__.keys())
+					csvheader = False
+				csvwriter.writerow(telemetry)
+				csvwriterxsim.writerow(xsim_packet)
 			try:
-				xsim_socket.sendto(xsim_packet, xsim_client_address)
+				if args.xsimoutput:
+					xsim_socket.sendto(xsim_packet, xsim_client_address)
 			except Exception as e:
-				print('Error sending telemetry to SRS ', str(e))
+				print('Error sending telemetry to XSim ', str(e))
 
 			if cgear < 1:
-				cgear = 'R'
+			   cgear = 'R'
 			if sgear > 14:
 				sgear = '–'
 
@@ -427,31 +455,29 @@ while True:
 
 			printAt('{:>8}'.format(str(td(seconds=round(telemetry.day_progression_ms / 1000)))), 3, 56, reverse=1)	# time of day on track
 
-			printAt('{:3.0f}'.format(curlap), 5, 7)															# current lap
-			printAt('{:3.0f}'.format(telemetry.total_laps), 5, 11)						# total laps
+			printAt('{:3.0f}'.format(curlap), 5, 7)								# current lap
+			printAt('{:3.0f}'.format(telemetry.total_laps), 5, 11)				# total laps
 
-			printAt('{:2.0f}'.format(telemetry.pre_race_start_position), 5, 31)						# current position
-			printAt('{:2.0f}'.format(telemetry.pre_race_num_cars), 5, 34)						# total positions
+			printAt('{:2.0f}'.format(telemetry.pre_race_start_position), 5, 31)	# current position
+			printAt('{:2.0f}'.format(telemetry.pre_race_num_cars), 5, 34)		# total positions
 
 			if bstlap != -1:
-				printAt('{:>9}'.format(secondsToLaptime(bstlap / 1000)), 7, 16)		# best lap time
+				printAt('{:>9}'.format(secondsToLaptime(bstlap / 1000)), 7, 16)	# best lap time
 			else:
 				printAt('{:>9}'.format(''), 7, 16)
 			if lstlap != -1:
-				printAt('{:>9}'.format(secondsToLaptime(lstlap / 1000)), 8, 16)		# last lap time
+				printAt('{:>9}'.format(secondsToLaptime(lstlap / 1000)), 8, 16)	# last lap time
 			else:
 				printAt('{:>9}'.format(''), 8, 16)
 			printAt(str(lapcounter.laptime()), 8, 49)		
-
-			printAt('{:5.0f}'.format(telemetry.car_code), 10, 48, reverse=1)		# car id
-
-			printAt('{:3.0f}'.format(telemetry.throttle / 2.55), 12, 11)				# throttle
+			printAt('{:5.0f}'.format(telemetry.car_code), 10, 48, reverse=1)	# car id
+			printAt('{:3.0f}'.format(telemetry.throttle / 2.55), 12, 11)		# throttle
 			printAt('{:7.0f}'.format(telemetry.rpm), 12, 25)					# rpm
-			printAt('{:7.1f}'.format(carSpeed), 12, 47)														# speed kph
-			printAt('{:3.0f}'.format(telemetry.brake / 2.55), 13, 11)				# brake
-			printAt('{}'.format(cgear), 13, 27)																# actual gear
-			printAt('{}'.format(sgear), 13, 30)																# suggested gear
-			printAt('{:>10}'.format(pktid), 1, 83)						# packet id
+			printAt('{:7.1f}'.format(carSpeed), 12, 47)							# speed kph
+			printAt('{:3.0f}'.format(telemetry.brake / 2.55), 13, 11)			# brake
+			printAt('{}'.format(cgear), 13, 27)									# actual gear
+			printAt('{}'.format(sgear), 13, 30)									# suggested gear
+			printAt('{:>10}'.format(pktid), 1, 83)								# packet id
 
 			if not args.silent:
 				fuelCapacity = telemetry.fuel_capacity
@@ -459,86 +485,86 @@ while True:
 				if isEV:
 					printAt('Charge:', 14, 1)
 					printAt('{:3.0f} kWh'.format(telemetry.fuel_level), 14, 11)		# charge remaining
-					printAt('??? kWh'.format(telemetry.fuel_capacity), 14, 29)			# max battery capacity
+					printAt('??? kWh'.format(telemetry.fuel_capacity), 14, 29)		# max battery capacity
 				else:
 					printAt('Fuel:  ', 14, 1)
 					printAt('{:3.0f} lit'.format(telemetry.fuel_level), 14, 11)		# fuel
-					printAt('{:3.0f} lit'.format(telemetry.fuel_capacity), 14, 29)		# max fuel
+					printAt('{:3.0f} lit'.format(telemetry.fuel_capacity), 14, 29)	# max fuel
 
 				if hasTurbo:
 					printAt('{:7.2f}'.format(telemetry.boost - 1), 13, 47)			# boost
 				else:
-					printAt('{:>7}'.format('–'), 13, 47)														# no turbo
+					printAt('{:>7}'.format('–'), 13, 47)							# no turbo
 
-				printAt('{:5.0f}'.format(telemetry.max_alert_rpm), 13, 83)					# rpm rev limiter
-				printAt('{:5.0f}'.format(telemetry.min_alert_rpm), 12, 83)					# rpm rev warning
-				printAt('{:5.0f}'.format(telemetry.calculated_max_speed), 14, 83)					# estimated top speed
+				printAt('{:5.0f}'.format(telemetry.max_alert_rpm), 13, 83)			# rpm rev limiter
+				printAt('{:5.0f}'.format(telemetry.min_alert_rpm), 12, 83)			# rpm rev warning
+				printAt('{:5.0f}'.format(telemetry.calculated_max_speed), 14, 83)	# estimated top speed
 
-				printAt('{:5.3f}'.format(telemetry.clutch_pedal), 15, 9)						# clutch
-				printAt('{:5.3f}'.format(telemetry.clutch_engagement), 15, 17)					# clutch engaged
-				printAt('{:7.0f}'.format(telemetry.rpm_clutch_gearbox), 15, 48)					# rpm after clutch
+				printAt('{:5.3f}'.format(telemetry.clutch_pedal), 15, 9)			# clutch
+				printAt('{:5.3f}'.format(telemetry.clutch_engagement), 15, 17)		# clutch engaged
+				printAt('{:7.0f}'.format(telemetry.rpm_clutch_gearbox), 15, 48)		# rpm after clutch
 
-				printAt('{:6.1f}'.format(telemetry.oil_temperature), 17, 17)					# oil temp
-				printAt('{:6.1f}'.format(telemetry.water_temperature), 17, 49)					# water temp
+				printAt('{:6.1f}'.format(telemetry.oil_temperature), 17, 17)		# oil temp
+				printAt('{:6.1f}'.format(telemetry.water_temperature), 17, 49)		# water temp
 
-				printAt('{:6.2f}'.format(telemetry.oil_pressure_bar), 18, 17)					# oil pressure
-				printAt('{:6.0f}'.format(1000 * telemetry.body_height), 18, 49)				# ride height
+				printAt('{:6.2f}'.format(telemetry.oil_pressure_bar), 18, 17)		# oil pressure
+				printAt('{:6.0f}'.format(1000 * telemetry.body_height), 18, 49)		# ride height
 
-				printAt('{:6.1f}'.format(telemetry.tire_temp_FL), 21, 5)						# tyre temp FL
-				printAt('{:6.1f}'.format(telemetry.tire_temp_FR), 21, 25)					# tyre temp FR
-				printAt('{:6.1f}'.format(telemetry.tire_temp_RL), 25, 5)						# tyre temp RL
-				printAt('{:6.1f}'.format(telemetry.tire_temp_RR), 25, 25)					# tyre temp RR
+				printAt('{:6.1f}'.format(telemetry.tire_temp_FL), 21, 5)			# tyre temp FL
+				printAt('{:6.1f}'.format(telemetry.tire_temp_FR), 21, 25)			# tyre temp FR
+				printAt('{:6.1f}'.format(telemetry.tire_temp_RL), 25, 5)			# tyre temp RL
+				printAt('{:6.1f}'.format(telemetry.tire_temp_RR), 25, 25)			# tyre temp RR
 				
-				printAt('{:6.1f}'.format(200 * tyreDiamFL), 21, 43)												# tyre diameter FL
-				printAt('{:6.1f}'.format(200 * tyreDiamFR), 21, 50)												# tyre diameter FR
-				printAt('{:6.1f}'.format(200 * tyreDiamRL), 25, 43)												# tyre diameter RL
-				printAt('{:6.1f}'.format(200 * tyreDiamRR), 25, 50)												# tyre diameter RR
+				printAt('{:6.1f}'.format(200 * tyreDiamFL), 21, 43)					# tyre diameter FL
+				printAt('{:6.1f}'.format(200 * tyreDiamFR), 21, 50)					# tyre diameter FR
+				printAt('{:6.1f}'.format(200 * tyreDiamRL), 25, 43)					# tyre diameter RL
+				printAt('{:6.1f}'.format(200 * tyreDiamRR), 25, 50)					# tyre diameter RR
 
-				printAt('{:6.1f}'.format(tyreSpeedFL), 22, 5)													# tyre speed FL
-				printAt('{:6.1f}'.format(tyreSpeedFR), 22, 25)													# tyre speed FR
-				printAt('{:6.1f}'.format(tyreSpeedRL), 26, 5)													# tyre speed RL
-				printAt('{:6.1f}'.format(tyreSpeedRR), 26, 25)													# tyre speed RR
+				printAt('{:6.1f}'.format(tyreSpeedFL), 22, 5)						# tyre speed FL
+				printAt('{:6.1f}'.format(tyreSpeedFR), 22, 25)						# tyre speed FR
+				printAt('{:6.1f}'.format(tyreSpeedRL), 26, 5)						# tyre speed RL
+				printAt('{:6.1f}'.format(tyreSpeedRR), 26, 25)						# tyre speed RR
 				
-				printAt(tyreSlipRatioFL, 22, 43)																# tyre slip ratio FL
-				printAt(tyreSlipRatioFR, 22, 50)																# tyre slip ratio FR
-				printAt(tyreSlipRatioRL, 26, 43)																# tyre slip ratio RL
-				printAt(tyreSlipRatioRR, 26, 50)																# tyre slip ratio RR
+				printAt(tyreSlipRatioFL, 22, 43)									# tyre slip ratio FL
+				printAt(tyreSlipRatioFR, 22, 50)									# tyre slip ratio FR
+				printAt(tyreSlipRatioRL, 26, 43)									# tyre slip ratio RL
+				printAt(tyreSlipRatioRR, 26, 50)									# tyre slip ratio RR
 
-				printAt('{:6.3f}'.format(telemetry.susp_height_FL), 23, 5)						# suspension FL
-				printAt('{:6.3f}'.format(telemetry.susp_height_FR), 23, 25)					# suspension FR
-				printAt('{:6.3f}'.format(telemetry.susp_height_RL), 27, 5)						# suspension RL
-				printAt('{:6.3f}'.format(telemetry.susp_height_RR), 27, 25)					# suspension RR
+				printAt('{:6.3f}'.format(telemetry.susp_height_FL), 23, 5)			# suspension FL
+				printAt('{:6.3f}'.format(telemetry.susp_height_FR), 23, 25)			# suspension FR
+				printAt('{:6.3f}'.format(telemetry.susp_height_RL), 27, 5)			# suspension RL
+				printAt('{:6.3f}'.format(telemetry.susp_height_RR), 27, 25)			# suspension RR
 				
-				printAt('{:7.3f}'.format(telemetry.gear_ratio1), 30, 5)					# 1st gear
-				printAt('{:7.3f}'.format(telemetry.gear_ratio2), 31, 5)					# 2nd gear
-				printAt('{:7.3f}'.format(telemetry.gear_ratio3), 32, 5)					# 3rd gear
-				printAt('{:7.3f}'.format(telemetry.gear_ratio4), 33, 5)					# 4th gear
-				printAt('{:7.3f}'.format(telemetry.gear_ratio5), 34, 5)					# 5th gear
-				printAt('{:7.3f}'.format(telemetry.gear_ratio6), 35, 5)					# 6th gear
-				printAt('{:7.3f}'.format(telemetry.gear_ratio7), 36, 5)					# 7th gear
-				printAt('{:7.3f}'.format(telemetry.gear_ratio8), 37, 5)					# 8th gear
+				printAt('{:7.3f}'.format(telemetry.gear_ratio1), 30, 5)				# 1st gear
+				printAt('{:7.3f}'.format(telemetry.gear_ratio2), 31, 5)				# 2nd gear
+				printAt('{:7.3f}'.format(telemetry.gear_ratio3), 32, 5)				# 3rd gear
+				printAt('{:7.3f}'.format(telemetry.gear_ratio4), 33, 5)				# 4th gear
+				printAt('{:7.3f}'.format(telemetry.gear_ratio5), 34, 5)				# 5th gear
+				printAt('{:7.3f}'.format(telemetry.gear_ratio6), 35, 5)				# 6th gear
+				printAt('{:7.3f}'.format(telemetry.gear_ratio7), 36, 5)				# 7th gear
+				printAt('{:7.3f}'.format(telemetry.gear_ratio8), 37, 5)				# 8th gear
 
-				printAt('{:7.3f}'.format(telemetry.transmission_top_speed), 39, 5)					# ??? gear
+				printAt('{:7.3f}'.format(telemetry.transmission_top_speed), 39, 5)	# ??? gear
 
-				printAt('{:11.4f}'.format(telemetry.position_x), 30, 28)					# pos X
-				printAt('{:11.4f}'.format(telemetry.position_y), 31, 28)					# pos Y
-				printAt('{:11.4f}'.format(telemetry.position_z), 32, 28)					# pos Z
+				printAt('{:11.4f}'.format(telemetry.position_x), 30, 28)		# pos X
+				printAt('{:11.4f}'.format(telemetry.position_y), 31, 28)		# pos Y
+				printAt('{:11.4f}'.format(telemetry.position_z), 32, 28)		# pos Z
 
-				printAt('{:11.4f}'.format(telemetry.velocity_x), 30, 43)					# velocity X
-				printAt('{:11.4f}'.format(telemetry.velocity_y), 31, 43)					# velocity Y
-				printAt('{:11.4f}'.format(telemetry.velocity_z), 32, 43)					# velocity Z
+				printAt('{:11.4f}'.format(telemetry.velocity_x), 30, 43)		# velocity X
+				printAt('{:11.4f}'.format(telemetry.velocity_y), 31, 43)		# velocity Y
+				printAt('{:11.4f}'.format(telemetry.velocity_z), 32, 43)		# velocity Z
 
-				printAt('{:9.4f}'.format(telemetry.rotation_x), 35, 28)					# rot Pitch
-				printAt('{:9.4f}'.format(telemetry.rotation_y), 36, 28)					# rot Yaw
-				printAt('{:9.4f}'.format(telemetry.rotation_z), 37, 28)					# rot Roll
+				printAt('{:9.4f}'.format(telemetry.rotation_x), 35, 28)			# rot Pitch
+				printAt('{:9.4f}'.format(telemetry.rotation_y), 36, 28)			# rot Yaw
+				printAt('{:9.4f}'.format(telemetry.rotation_z), 37, 28)			# rot Roll
 
 				printAt('{:9.4f}'.format(telemetry.angularvelocity_x), 35, 45)
 				printAt('{:9.4f}'.format(telemetry.angularvelocity_y), 36, 45)
 				printAt('{:9.4f}'.format(telemetry.angularvelocity_z), 37, 45)
 
-				printAt('{:9.4f}'.format(accel_x), 35, 65)					# acceleration X
-				printAt('{:9.4f}'.format(accel_y), 36, 65)					# acceleration Y
-				printAt('{:9.4f}'.format(accel_z), 37, 65)					# acceleration Z
+				printAt('{:9.4f}'.format(accel_x), 35, 65)		# acceleration X
+				printAt('{:9.4f}'.format(accel_y), 36, 65)		# acceleration Y
+				printAt('{:9.4f}'.format(accel_z), 37, 65)		# acceleration Z
 
 				printAt('{:7.4f}'.format(telemetry.northorientation), 39, 25)					# rot ???
 
@@ -549,7 +575,7 @@ while True:
 				printAt('Map X {:11.5f}'.format(telemetry.road_plane_x), 27, 71)			# 0x94 = ???
 				printAt('Map Y {:11.5f}'.format(telemetry.road_plane_y), 28, 71)			# 0x98 = ???
 				printAt('Map Z {:11.5f}'.format(telemetry.road_plane_z), 29, 71)			# 0x9C = ???
-				printAt('Map Dist {:11.5f}'.format(telemetry.road_plane_dist), 30, 71)			# 0xA0 = ???
+				printAt('Map Dist {:11.5f}'.format(telemetry.road_plane_dist), 30, 71)		# 0xA0 = ???
 
 			#printAt('0xD4 FLOAT {:11.5f}'.format(struct.unpack('f', ddata[0xD4:0xD4+4])[0]), 32, 71)			# 0xD4 = ???
 			#printAt('0xD8 FLOAT {:11.5f}'.format(struct.unpack('f', ddata[0xD8:0xD8+4])[0]), 33, 71)			# 0xD8 = ???

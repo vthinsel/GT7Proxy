@@ -18,13 +18,13 @@ class TelemetryPacket(Structure):
                 ('speed', c_float),  # float
                 ('rpm', c_float),  # float
                 ('max_rpm', c_float),  # float
-                ('gear', c_short),  # -1 = revere 0=Neutral 1 to 9=gears
-                ('rx', c_float),  # in degrees -180 to +180
-                ('ry', c_float),  # in degrees -180 to +180
-                ('rz', c_float),  # in degrees -180 to +180
-                ('ax', c_float),  # in float between -2 to 2 used for traction loss
-                ('ay', c_float),  # gforce in float values beteween 0 to 10
-                ('az', c_float),  # gforce in float values beteween 0 to 10
+                ('gear', c_short),  # -1=revere 0=Neutral 1 to 9=gears
+                ('rx', c_float),  # in degrees -180 to +180 - Roll for XSim plugin
+                ('ry', c_float),  # in degrees -180 to +180 Yaw for XSim plugin
+                ('rz', c_float),  # in degrees -180 to +180 Pitch for XSim plugin
+                ('ax', c_float),  # gforce acceleration  Surge for XSim plugin
+                ('ay', c_float),  # gforce acceleration Heave for XSim plugin
+                ('az', c_float),  # gforce acceleration Sway for XSim plugin
                 ('traction_loss', c_float),  # gforce in float values beteween 0 to 10
                 ('oil_temp', c_float),  # oil temp
                 ('oil_pressure', c_float),  # oil pressure
@@ -64,4 +64,14 @@ class TelemetryPacket(Structure):
                 ('suspvelocityFR', c_float),
                 ('suspvelocityRL', c_float),
                 ('suspvelocityRR', c_float),
+                ('lights',c_bool),
+                ('localvelocity_x', c_float),
+                ('localvelocity_y', c_float),
+                ('localvelocity_z', c_float),
                 ]
+    def __iter__(self):
+        #return iter([self.position_x, self.position_y, self.position_z])
+        #return iter(vars(self))
+        #attrs = vars(self)
+        #print(', '.join("%s: %s" % item for item in attrs.items()))
+        return iter(self.__dict__.values())
