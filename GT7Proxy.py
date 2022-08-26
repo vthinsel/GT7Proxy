@@ -13,6 +13,8 @@ import pickle
 import time
 from gt_packet_definition import GTDataPacket
 from xsim_packet_definition import TelemetryPacket, PACKET_HEADER, API_VERSION
+import math
+import numpy as np
 
 # ansi prefix
 pref = "\033["
@@ -34,14 +36,6 @@ signal.signal(signal.SIGINT, handler)
 sys.stdout.write(f'{pref}?1049h')	# alt buffer
 sys.stdout.write(f'{pref}?25l')		# hide cursor
 sys.stdout.flush()
-
-# get ip address from command line
-#if len(sys.argv) == 2:
-#    ip = sys.argv[1]
-#else:
-#    print('Run like : python3 gt7telemetry.py <playstation-ip>')
-#    exit(1)
-
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--ps_ip",
@@ -80,7 +74,6 @@ parser.add_argument("--xsimoutput",
                     help="Do not send outout to Xsim")
 
 args = parser.parse_args()
-
 
 # Create a UDP socket and bind it
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -181,6 +174,38 @@ class LapCounter:
         laptime = (self.lapticks() * 1./60.) - (self.special_packet_time/1000.)
         return round(laptime,3)
 
+
+def quat_conj(Q):
+	return (-Q[0],-Q[1],-Q[2],Q[3])
+
+def quat_vec(Q):
+	return (Q[0],Q[1],Q[2])
+
+def quat_scalar(Q):
+	return Q[3]
+
+def cross(A,B):
+	return (A[1]*B[2]-A[2]*B[1],A[2]*B[0]-A[0]*B[2],A[0]*B[1]-A[1]*B[0])
+
+def add(A,B):
+	return (A[0]+B[0],A[1]+B[1],A[2]+B[2])
+
+def sub(A,B):
+	return (A[0]-B[0],A[1]-B[1],A[2]-B[2])
+
+def scale(A,s):
+	return (A[0]*s,A[1]*s,A[2]*s)
+
+def quat_rot(V,Q):
+	Qv = quat_vec(Q)
+	U = cross(Qv,V)
+	w = quat_scalar(Q)
+	P = add(U,scale(V,w))
+	T = scale(Qv,2)
+	RR = cross(T,P)
+	R = add(V,RR)
+	return R
+
 # start by sending heartbeat
 send_hb(s)
 
@@ -199,7 +224,7 @@ printAt('{:<92}'.format('Current Car Data'), 10, 1, reverse=1, bold=1)
 printAt('Car ID:', 10, 41, reverse=1)
 printAt('Throttle:    %', 12, 1)
 printAt('RPM:        rpm', 12, 21)
-printAt('Speed:        kph', 12, 41)
+printAt('Speed:        mps', 12, 41)
 printAt('Brake:       %', 13, 1)
 printAt('Gear:   ( )', 13, 21)
 
@@ -241,17 +266,22 @@ if not args.silent:
 	printAt('8th:', 37, 1)
 	printAt('???:', 39, 1)
 
-	printAt('Positioning (m)', 29, 21, underline=1)
+	printAt('Position (m)', 29, 21, underline=1)
 	printAt('X:', 30, 21)
 	printAt('Y:', 31, 21)
 	printAt('Z:', 32, 21)
 
-	printAt('Velocity (m/s)', 29, 41, underline=1)
+	printAt('World. Vel (m/s)', 29, 41, underline=1)
 	printAt('X:', 30, 41)
 	printAt('Y:', 31, 41)
 	printAt('Z:', 32, 41)
 
-	printAt('Rotation', 34, 21, underline=1)
+	printAt('Loc. Vel (m/s)', 29, 58, underline=1)
+	printAt('X:', 30, 58)
+	printAt('Y:', 31, 58)
+	printAt('Z:', 32, 58)
+
+	printAt('Rotation (rad)', 34, 21, underline=1)
 	printAt('X/Pitch:', 35, 21)
 	printAt('Y/Yaw:', 36, 21)
 	printAt('Z/Roll:', 37, 21)
@@ -261,7 +291,10 @@ if not args.silent:
 	printAt('Y:', 36, 41)
 	printAt('Z:', 37, 41)
 
-	printAt('Acceleration (m/s^2)', 34, 58, underline=1)
+	printAt('Traction Loss', 39, 41, underline=1)
+	printAt('Slip:', 40, 41)
+
+	printAt('Acceleration (G)', 34, 58, underline=1)
 	printAt('X/Surge:', 35, 58)
 	printAt('Y/Sway:', 36, 58)
 	printAt('Z/Heave:', 37, 58)
@@ -274,10 +307,13 @@ prevlap = -1
 pktid = 0
 pknt = 0
 previousts = datetime.datetime.now()
+tmpfile = open("tmpfile.log", 'w')
+tmpfile.write("speed,world_x,world_y,world_z,pitch,yaw,roll,northorientation,world_velocity_x,world_velocity_y,world_velocity_z,local_velo_lateral,local_velo_up,local_velo_forward,accel_x,accel_y,accel_z,slip\n")
+
+
 if args.logpackets:
 	f1 = open("GT7packets.cap", 'wb')
 	f2 = open("GT7packets.raw.cap" , 'wb')
-	f3 = open("GT7packets.csv", 'wb')
 if args.csvoutput:
 	csvfile=open("GT7data.csv",'w', newline='')
 	csvwriter = csv.writer(csvfile)
@@ -286,19 +322,20 @@ if args.csvoutput:
 delta = 0
 udppackets = 0
 lapcounter = LapCounter()
-previous_local_velocity_x = 0
-previous_local_velocity_y = 0
-previous_local_velocity_z = 0
+previous_local_velocity = (0,0,0)
 accel_x = 0
 accel_y = 0
 accel_z = 0
+accel = (0,0,0)
 csvheader = True
+#dp_prev = 0
+slip_angle = 0
 while True:
 	try:
 		data, address = s.recvfrom(4096)
 		ts = datetime.datetime.now()
 		delta = ts - previousts
-		previousts = datetime.datetime.now()
+		previousts = ts
 		if args.logpackets:
 			previoustime = ('{:%H:%M:%S:%f}'.format(datetime.datetime.now()))
 			record = [previoustime, delta, data]
@@ -331,24 +368,116 @@ while True:
 				printAt('{:>9}'.format(''), 7, 49)
 			# https://gamedev.stackexchange.com/questions/79765/how-do-i-convert-from-the-global-coordinate-space-to-a-local-space
 			# We need to turn world velocity(x,y,z) to local velocity (x1,y1,z1)
-			angle=atan2(telemetry.velocity_x,telemetry.velocity_z)
-			local_velocity_x=sin(angle)*telemetry.velocity_x+cos(angle)*telemetry.velocity_z # Surge
+			'''
+			angle=atan2(telemetry.world_velocity_x,telemetry.world_velocity_z)
+			local_velocity_x = sin(angle)*telemetry.world_velocity_x + cos(angle)*telemetry.world_velocity_z # Surge
+			local_velocity_y = -sin(angle)*telemetry.world_velocity_x + cos(angle)*telemetry.world_velocity_z
+			local_velocity_z = sin(angle)*telemetry.world_velocity_x + cos(angle)*telemetry.world_velocity_z
+			'''
+			#roll (x-axis rotation)
+			#sinr_cosp = 2 * (telemetry.northorientation * telemetry.rotation_x + telemetry.rotation_y * telemetry.rotation_z)
+			#cosr_cosp = 1 - 2 * (telemetry.rotation_x * telemetry.rotation_x + telemetry.rotation_y * telemetry.rotation_y)
+			#roll = math.atan2(sinr_cosp, cosr_cosp);
+
+			#pitch (y-axis rotation)
+			#sinp = 2 * (telemetry.northorientation * telemetry.rotation_y - telemetry.rotation_z * telemetry.rotation_x);
+			#if (abs(sinp) >= 1):
+			#	pitch = copysign(np.pi / 2, sinp) # use 90 degrees if out of range
+			#else:
+			#pitch = math.asin(sinp)
+
+			# yaw (z-axis rotation)
+			#siny_cosp = 2 * (telemetry.northorientation * telemetry.rotation_z + telemetry.rotation_x * telemetry.rotation_y);
+			#cosy_cosp = 1 - 2 * (telemetry.rotation_y * telemetry.rotation_y + telemetry.rotation_z * telemetry.rotation_z);
+			#yaw = math.atan2(siny_cosp, cosy_cosp);
+
+			pitch = telemetry.rotation_x*np.pi
+			yaw = telemetry.rotation_y*np.pi
+			roll = telemetry.rotation_z*np.pi
+
+			'''
+			pitchMatrix = np.matrix([
+					[1, 				0,					0],
+					[0,		math.cos(pitch), -math.sin(pitch)],
+					[0, 	math.sin(pitch), math.cos(pitch)]
+			])
+			yawMatrix = np.matrix([
+					[math.cos(yaw),		0,		math.sin(yaw)],
+					[0,					1,					0],
+					[-math.sin(yaw),	0,		math.cos(yaw)]
+			])
+			rollMatrix = np.matrix([
+					[math.cos(roll),	-math.sin(roll),	0],
+					[math.sin(roll),	math.cos(roll),		0],
+					[0,					0,					1]
+			])
+
+			R = yawMatrix * pitchMatrix * rollMatrix
+			'''
+			#alpha=yaw
+			#beta=pitch
+			#gamma=roll
+			#R=np.matrix(
+		#		[
+		#		[math.cos(alpha)*math.cos(beta), 		math.cos(alpha)*math.sin(beta)*math.sin(gamma) - math.sin(alpha)*math.cos(gamma),	math.cos(alpha)*math.sin(beta)*math.cos(gamma) + math.sin(alpha)*math.sin(gamma)],
+		#		[math.sin(alpha)*math.cos(beta), 		math.sin(alpha)*math.sin(beta)*math.sin(gamma) + math.cos(alpha)*math.cos(gamma),	math.sin(alpha)*math.sin(beta)*math.cos(gamma) - math.sin(alpha)*math.sin(gamma)],
+		#		[-math.sin(beta), 						math.cos(beta)*math.sin(gamma),														math.cos(beta)*math.cos(gamma)]
+		#		])
+			#R=np.matrix(
+			#	[
+			#	[math.cos(beta)*math.cos(gamma),		math.sin(alpha)*math.sin(beta)*math.cos(gamma) - math.cos(alpha)*math.sin(gamma),	math.cos(alpha)*math.sin(beta)*math.cos(gamma) + math.sin(alpha)*math.sin(gamma)],
+			#	[math.cos(beta)*math.sin(gamma),		math.sin(alpha)*math.sin(beta)*math.sin(gamma) + math.cos(alpha)*math.cos(gamma),	math.cos(alpha)*math.sin(beta)*math.sin(gamma) - math.sin(alpha)*math.cos(gamma)],
+			#	[-math.sin(beta),						math.sin(alpha)*math.cos(beta),														math.cos(alpha)*math.cos(beta)]
+			#	])
+			#R=np.matrix(
+			#	[
+			#	[math.cos(yaw)*math.cos(roll) + math.sin(yaw)*math.sin(pitch)*math.sin(roll),		math.cos(roll)*math.sin(yaw)*math.sin(pitch) - math.sin(roll)*math.cos(yaw),		math.cos(pitch)*math.sin(yaw)],
+			#	[math.cos(pitch)*math.sin(roll)												,		math.cos(roll)*math.cos(pitch),														-math.sin(pitch)],
+			#	[math.sin(roll)*math.cos(yaw)*math.sin(pitch) - math.sin(yaw)*math.cos(roll),		math.sin(yaw)*math.sin(roll) + math.cos(roll)*math.cos(yaw)*math.sin(pitch),		math.cos(pitch)*math.cos(yaw)]
+			#	])
+				
+			#world_velocity_vector_col=np.matrix([[telemetry.world_velocity_x],[telemetry.world_velocity_y],[telemetry.world_velocity_z]])
+			#world_velocity_vector_row=np.matrix([telemetry.world_velocity_x,telemetry.world_velocity_y,telemetry.world_velocity_z])
+			#local_velocity=np.matrix([telemetry.world_velocity_x,telemetry.world_velocity_y,telemetry.world_velocity_z])*np.linalg.inv(R) #np.matrix.transpose(R)
+			#local_velocity=world_velocity_vector_row*np.linalg.inv(R) #np.matrix.transpose(R)
+			#local_velo_forward=np.dot(R[2],world_velocity_vector_col).item(0)
+			#local_velo_lateral=np.dot(R[0],world_velocity_vector_col).item(0)
+			#local_velo_up=np.dot(R[1],world_velocity_vector_col).item(0)
 			
-			local_velocity_y = cos(angle)*telemetry.velocity_x-sin(angle)*telemetry.velocity_z # Heave
-			local_velocity_z = sin(angle)*telemetry.velocity_x+cos(angle)*telemetry.velocity_z # Sway
-			
-			local_velocity_y = 0
-			local_velocity_z = 0
-			
-			
+			P = struct.unpack_from('fff',ddata,0x4)
+			#print('Position',P)
+			V = struct.unpack_from('fff',ddata,0x10)
+			#print('Global Velocity',V)
+			Q = struct.unpack_from('ffff',ddata,0x1C)
+			Qc = quat_conj(Q)
+			Local_Velocity = quat_rot(V,Qc)
+			#print("Local Velocity:",LocalVelocity)
+			#dV = sub(Local_Velocity,Vp)
+			#A = scale(dV,60)
+			#print("Acceleration:",A)
+			#G = scale(A,1.0/9.81)
+			#print("G-Forces:",G)
+			#Vp = Local_Velocity
+			if Local_Velocity[2] != 0:
+				slip_angle = math.degrees(math.atan(Local_Velocity[0]/abs(Local_Velocity[2])))
+			else:
+				slip_angle=0
 			if delta.microseconds != 0:
+				accel_x=((Local_Velocity[0] - previous_local_velocity[0] )*1000000 / delta.microseconds) #/ 9.81
+				accel_y=((Local_Velocity[1] - previous_local_velocity[1] )*1000000 / delta.microseconds) #/ 9.81
+				accel_z=((Local_Velocity[2] - previous_local_velocity[2] )*1000000 / delta.microseconds) #/ 9.81
+				#accel=((Local_Velocity - previous_local_velocity)*1000000 / delta.microseconds) / 9.81
+				previous_local_velocity=Local_Velocity
+				
+				'''
 				accel_x=(local_velocity_x - previous_local_velocity_x )*1000000 / delta.microseconds
 				accel_y=(local_velocity_y - previous_local_velocity_y )*1000000 / delta.microseconds
 				accel_z=(local_velocity_z - previous_local_velocity_z )*1000000 / delta.microseconds
-			previous_local_velocity_x=local_velocity_x
-			previous_local_velocity_y=local_velocity_y
-			previous_local_velocity_z=local_velocity_z
-			
+				previous_local_velocity_x=local_velocity_x
+				previous_local_velocity_y=local_velocity_y
+				previous_local_velocity_z=local_velocity_z
+				'''
+			tmpfile.write(f"{telemetry.speed},{telemetry.position_x},{telemetry.position_y},{telemetry.position_z},{pitch},{yaw},{roll},{telemetry.northorientation},{telemetry.world_velocity_x},{telemetry.world_velocity_y},{-telemetry.world_velocity_z},{Local_Velocity[0]},{Local_Velocity[1]},{Local_Velocity[2]},{accel_x},{accel_y},{accel_z},{slip_angle}\n")
 			xsim_packet = TelemetryPacket(PACKET_HEADER,
 								API_VERSION,
 								str.encode("PS_GT7"),
@@ -359,12 +488,12 @@ while True:
 								telemetry.rpm,
 								telemetry.max_alert_rpm,
 								cgear,
-								telemetry.rotation_x, # roll
+								telemetry.rotation_z, # roll
 								telemetry.rotation_y, # yaw
-								telemetry.rotation_z, # pitch
-								accel_x , # surge
+								telemetry.rotation_x, # pitch
+								accel_z , # surge
 								accel_y , # heave
-								accel_z , # sway
+								accel_x , # sway
 								0, # Traction Loss
 								telemetry.oil_temperature,
 								telemetry.oil_pressure_bar,
@@ -380,9 +509,9 @@ while True:
 								telemetry.position_x,
 								telemetry.position_y,
 								telemetry.position_z,
-								telemetry.velocity_x,
-								telemetry.velocity_y,
-								telemetry.velocity_z,
+								telemetry.world_velocity_x,
+								telemetry.world_velocity_y,
+								telemetry.world_velocity_z,
 								telemetry.angularvelocity_x,
 								telemetry.angularvelocity_y,
 								telemetry.angularvelocity_z,
@@ -405,9 +534,12 @@ while True:
 								telemetry.susp_height_RL,
 								telemetry.susp_height_RR,
 								telemetry.flags & 0b0000000001000000, # Lights on
-								local_velocity_x,
-								local_velocity_y,
-								local_velocity_z,
+								Local_Velocity[0] ,
+								Local_Velocity[1] ,
+								Local_Velocity[2] ,
+								#local_velocity_x,
+								#local_velocity_y ,
+								#local_velocity_z ,
 								)
 			if args.csvoutput:
 				if csvheader:
@@ -423,7 +555,7 @@ while True:
 				print('Error sending telemetry to XSim ', str(e))
 
 			if cgear < 1:
-			   cgear = 'R'
+				cgear = 'R'
 			if sgear > 14:
 				sgear = '–'
 
@@ -440,7 +572,8 @@ while True:
 			tyreSpeedRL = abs(3.6 * tyreDiamRL * telemetry.tire_rps_RL)
 			tyreSpeedRR = abs(3.6 * tyreDiamRR * telemetry.tire_rps_RR)
 
-			carSpeed = 3.6 * telemetry.speed
+			#carSpeed = 3.6 * telemetry.speed
+			carSpeed = telemetry.speed
 
 			if carSpeed > 0:
 				tyreSlipRatioFL = '{:6.2f}'.format(tyreSpeedFL / carSpeed)
@@ -550,17 +683,27 @@ while True:
 				printAt('{:11.4f}'.format(telemetry.position_y), 31, 28)		# pos Y
 				printAt('{:11.4f}'.format(telemetry.position_z), 32, 28)		# pos Z
 
-				printAt('{:11.4f}'.format(telemetry.velocity_x), 30, 43)		# velocity X
-				printAt('{:11.4f}'.format(telemetry.velocity_y), 31, 43)		# velocity Y
-				printAt('{:11.4f}'.format(telemetry.velocity_z), 32, 43)		# velocity Z
+				printAt('{:11.4f}'.format(telemetry.world_velocity_x), 30, 43)		# velocity X
+				printAt('{:11.4f}'.format(telemetry.world_velocity_y), 31, 43)		# velocity Y
+				printAt('{:11.4f}'.format(telemetry.world_velocity_z), 32, 43)		# velocity Z
 
-				printAt('{:9.4f}'.format(telemetry.rotation_x), 35, 28)			# rot Pitch
-				printAt('{:9.4f}'.format(telemetry.rotation_y), 36, 28)			# rot Yaw
-				printAt('{:9.4f}'.format(telemetry.rotation_z), 37, 28)			# rot Roll
+				printAt('{:9.4f}'.format(pitch), 35, 28)			# rot Pitch
+				printAt('{:9.4f}'.format(yaw), 36, 28)			# rot Yaw
+				printAt('{:9.4f}'.format(roll), 37, 28)			# rot Roll
+				#printAt('{:9.4f}'.format(telemetry.rotation_x), 35, 28)			# rot Pitch
+				#printAt('{:9.4f}'.format(telemetry.rotation_y), 36, 28)			# rot Yaw
+				#printAt('{:9.4f}'.format(telemetry.rotation_z), 37, 28)			# rot Roll
+
 
 				printAt('{:9.4f}'.format(telemetry.angularvelocity_x), 35, 45)
 				printAt('{:9.4f}'.format(telemetry.angularvelocity_y), 36, 45)
 				printAt('{:9.4f}'.format(telemetry.angularvelocity_z), 37, 45)
+
+				printAt('{:9.4f}'.format(slip_angle), 40, 45)
+
+				printAt('{:9.4f}'.format(Local_Velocity[0]), 30, 60)		# Loval velocity X
+				printAt('{:9.4f}'.format(Local_Velocity[1]), 31, 60)		# Loval velocity  Y
+				printAt('{:9.4f}'.format(Local_Velocity[2]), 32, 60)		# Loval velocity  Z
 
 				printAt('{:9.4f}'.format(accel_x), 35, 65)		# acceleration X
 				printAt('{:9.4f}'.format(accel_y), 36, 65)		# acceleration Y

@@ -8,9 +8,9 @@ class GTDataPacket:
          self.position_x,         #single
          self.position_y,         #single
          self.position_z,         #single
-         self.velocity_x,         #single
-         self.velocity_y,         #single
-         self.velocity_z,         #single
+         self.world_velocity_x,         #single
+         self.world_velocity_y,         #single
+         self.world_velocity_z,         #single
          self.rotation_x,         #single
          self.rotation_y,         #single
          self.rotation_z,         #single
