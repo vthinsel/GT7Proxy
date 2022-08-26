@@ -209,7 +209,7 @@ def quat_rot(V,Q):
 # start by sending heartbeat
 send_hb(s)
 
-printAt('GT7 Telemetry Display 0.7 (ctrl-c to quit)', 1, 1, bold=1)
+printAt('GT7 Telemetry Display and XSim Proxy 1.0 (ctrl-c to quit)', 1, 1, bold=1)
 printAt('Packet ID:', 1, 73)
 
 printAt('{:<92}'.format('Current Track Data'), 3, 1, reverse=1, bold=1)
@@ -365,13 +365,8 @@ while True:
 			yaw = math.degrees(telemetry.rotation_y*np.pi)
 			roll = math.degrees(telemetry.rotation_z*np.pi)
 			
-			#P = struct.unpack_from('fff',ddata,0x4)
 			P=(telemetry.position_x,telemetry.position_y,telemetry.position_z)
-			#print('Position',P)
-			#V = struct.unpack_from('fff',ddata,0x10)
 			V=(telemetry.world_velocity_x,telemetry.world_velocity_y,telemetry.world_velocity_z)
-			#print('Global Velocity',V)
-			#Q = struct.unpack_from('ffff',ddata,0x1C)
 			Q=(telemetry.rotation_x,telemetry.rotation_y,telemetry.rotation_z,telemetry.northorientation)
 			Qc = quat_conj(Q)
 			Local_Velocity = quat_rot(V,Qc)
