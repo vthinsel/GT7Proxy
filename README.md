@@ -32,16 +32,18 @@ Detailed usage:
     GT7Proxy.py [-h] --ps_ip PS_IP [--xsim_ip XSIM_IP] [--xsim_port XSIM_PORT] [--logpackets LOGPACKETS] [--csvoutput CSVOUTPUT] [--silent SILENT]
 
     options:
-    -h, --help            show this help message and exit
-    --ps_ip PS_IP         Playstation 4/5 IP address. Accepts IP or FQDN provided it resolves to something.
-    --xsim_ip XSIM_IP     IP of the computer where XSim is running. Default is 127.0.0.1
+    -h, --help              show this help message and exit
+    --ps_ip PS_IP           Playstation 4/5 IP address. Accepts IP or FQDN provided it resolves to something.
+    --xsim_ip XSIM_IP       IP of the computer where XSim is running. Default is 127.0.0.1
     --xsim_port XSIM_PORT
                             Port where the XSim plugin is expecting to receive telemetry. Default is 33800
     --logpackets LOGPACKETS
                             Optionnaly log packets for future playback using https://github.com/vthinsel/Python_UDP_Receiver/UDPSend_timed.py .Default is False
     --csvoutput CSVOUTPUT
                             Optionnaly output data to csv for analysis. Default is False
-    --silent SILENT       limit console output to most usefull data for dashboard. Default is False
+    --silent SILENT         limit console output to most usefull data for dashboard. Default is False
+     --xsimoutput XSIMOUTPUT
+                            Do not send outout to Xsim
 
 The logpackets will generate two files called GT7packets.cap and GT7packets.raw.cap
 
@@ -57,7 +59,6 @@ The GT7Proxy.exe will be located in the dist folder.
 ## Credits
 
 Without all great [GTPlanet](https://www.gtplanet.net/forum/threads/gt7-is-compatible-with-motion-rig.410728/) contributors this wouldn't have been possible. Kudos to all the guys there !
-
 
 Keep in mind that this is an undocumented API from Grand Turismo Series, the game developer
 might patch the game and close the door in the future.
