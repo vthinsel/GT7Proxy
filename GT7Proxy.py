@@ -1,6 +1,7 @@
 import argparse
 import csv
-from math import atan2, cos, sin
+from math import atan2, copysign, cos, sin
+import math
 import signal
 from datetime import datetime as dt
 from datetime import timedelta as td
@@ -13,7 +14,6 @@ import pickle
 import time
 from gt_packet_definition import GTDataPacket
 from xsim_packet_definition import TelemetryPacket, PACKET_HEADER, API_VERSION
-import math
 import numpy as np
 
 # ansi prefix
@@ -130,7 +130,6 @@ def secondsToLaptime(seconds):
 	remaining = seconds % 60
 	return '{:01.0f}:{:06.3f}'.format(minutes, remaining)
 
-
 class LapCounter:
     def __init__(self):
         self.lap = -1
@@ -175,27 +174,21 @@ class LapCounter:
         return round(laptime,3)
 
 
+#Misc functions to help in calculating roll/pitch/yaw heave/sway/surge based on Quaternion algebra
 def quat_conj(Q):
 	return (-Q[0],-Q[1],-Q[2],Q[3])
-
 def quat_vec(Q):
 	return (Q[0],Q[1],Q[2])
-
 def quat_scalar(Q):
 	return Q[3]
-
 def cross(A,B):
 	return (A[1]*B[2]-A[2]*B[1],A[2]*B[0]-A[0]*B[2],A[0]*B[1]-A[1]*B[0])
-
 def add(A,B):
 	return (A[0]+B[0],A[1]+B[1],A[2]+B[2])
-
 def sub(A,B):
 	return (A[0]-B[0],A[1]-B[1],A[2]-B[2])
-
 def scale(A,s):
 	return (A[0]*s,A[1]*s,A[2]*s)
-
 def quat_rot(V,Q):
 	Qv = quat_vec(Q)
 	U = cross(Qv,V)
@@ -206,12 +199,33 @@ def quat_rot(V,Q):
 	R = add(V,RR)
 	return R
 
-# start by sending heartbeat
+def roll_pitch_yaw(Q):
+    # see http://www.euclideanspace.com/maths/geometry/rotations/conversions/quaternionToEuler/Quaternions.pdf
+    # permute quaternion coefficients to determine
+    # order of roll/pitch/yaw rotation axes, scalar comes first always
+    P=(Q[3],Q[2],Q[0],Q[1])
+    # e is for handedness of axes
+    e = -1
+    x_p = 2*(P[0]*P[2] + e*P[1]*P[3])
+    pitch = math.asin(x_p)
+    if math.isclose(math.fabs(pitch),math.pi/2):
+        # handle singularity when pitch is +-90°
+        yaw = 0
+        roll = math.atan2(P[1],P[0])
+    else:
+        y_r = 2*(P[0]*P[1] - e*P[2]*P[3])
+        x_r = 1 - 2*(P[1]*P[1] + P[2]*P[2])
+        roll = math.atan2(y_r,x_r)
+        y_y = 2*(P[0]*P[3] - e*P[1]*P[2])
+        x_y = 1 - 2*(P[2]*P[2] + P[3]*P[3])
+        yaw = math.atan2(y_y,x_y)
+    return (roll*180/math.pi,pitch*180/math.pi,yaw*180/math.pi)
+
+# start by sending heartbeat to wake-up GT7 telemetry stack
 send_hb(s)
 
 printAt('GT7 Telemetry Display and XSim Proxy 1.0 (ctrl-c to quit)', 1, 1, bold=1)
 printAt('Packet ID:', 1, 73)
-
 printAt('{:<92}'.format('Current Track Data'), 3, 1, reverse=1, bold=1)
 printAt('Time on track:', 3, 41, reverse=1)
 printAt('Laps:    /', 5, 1)
@@ -224,7 +238,7 @@ printAt('{:<92}'.format('Current Car Data'), 10, 1, reverse=1, bold=1)
 printAt('Car ID:', 10, 41, reverse=1)
 printAt('Throttle:    %', 12, 1)
 printAt('RPM:        rpm', 12, 21)
-printAt('Speed:        mps', 12, 41)
+printAt('Speed:        km/h', 12, 41)
 printAt('Brake:       %', 13, 1)
 printAt('Gear:   ( )', 13, 21)
 
@@ -271,12 +285,12 @@ if not args.silent:
 	printAt('Y:', 31, 21)
 	printAt('Z:', 32, 21)
 
-	printAt('World. Vel (m/s)', 29, 41, underline=1)
+	printAt('World. Vel (km/h)', 29, 41, underline=1)
 	printAt('X:', 30, 41)
 	printAt('Y:', 31, 41)
 	printAt('Z:', 32, 41)
 
-	printAt('Loc. Vel (m/s)', 29, 58, underline=1)
+	printAt('Loc. Vel (km/h)', 29, 58, underline=1)
 	printAt('X:', 30, 58)
 	printAt('Y:', 31, 58)
 	printAt('Z:', 32, 58)
@@ -295,9 +309,9 @@ if not args.silent:
 	printAt('Slip:', 40, 41)
 
 	printAt('Acceleration (G)', 34, 58, underline=1)
-	printAt('X/Surge:', 35, 58)
-	printAt('Y/Sway:', 36, 58)
-	printAt('Z/Heave:', 37, 58)
+	printAt('X/Sway:', 35, 58)
+	printAt('Y/Heave:', 36, 58)
+	printAt('Z/Surge:', 37, 58)
 
 	printAt('N/S:', 39, 21)
 
@@ -308,6 +322,7 @@ pktid = 0
 pknt = 0
 previousts = datetime.datetime.now()
 
+# Create output files if needed
 if args.logpackets:
 	f1 = open("GT7packets.cap", 'wb')
 	f2 = open("GT7packets.raw.cap" , 'wb')
@@ -327,6 +342,7 @@ accel_z = 0
 accel = (0,0,0)
 csvheader = True
 slip_angle = 0
+
 while True:
 	try:
 		data, address = s.recvfrom(4096)
@@ -361,20 +377,24 @@ while True:
 				curLapTime = 0
 				printAt('{:>9}'.format(''), 7, 49)
 			
-			pitch = math.degrees(telemetry.rotation_x*np.pi)
-			yaw = math.degrees(telemetry.rotation_y*np.pi)
-			roll = math.degrees(telemetry.rotation_z*np.pi)
+			#pitch = math.degrees(telemetry.rotation_x*np.pi)
+			#yaw = math.degrees(telemetry.rotation_y*np.pi)
+			#roll = math.degrees(telemetry.rotation_z*np.pi)
 			
+			#Calculate local velocity based on quartenion & Co
 			P=(telemetry.position_x,telemetry.position_y,telemetry.position_z)
 			V=(telemetry.world_velocity_x,telemetry.world_velocity_y,telemetry.world_velocity_z)
 			Q=(telemetry.rotation_x,telemetry.rotation_y,telemetry.rotation_z,telemetry.northorientation)
 			Qc = quat_conj(Q)
 			Local_Velocity = quat_rot(V,Qc)
-			#print("Local Velocity:",LocalVelocity)
 			if Local_Velocity[2] != 0:
 				slip_angle = math.degrees(math.atan(Local_Velocity[0]/abs(Local_Velocity[2])))
 			else:
 				slip_angle=0
+			
+			#Calculate roll/pitch/yaw based on quartenion & Co
+			roll,pitch,yaw = roll_pitch_yaw(Q)
+			
 			if delta.microseconds != 0:
 				accel_x=((Local_Velocity[0] - previous_local_velocity[0] )*1000000 / delta.microseconds) / 9.81 
 				accel_y=((Local_Velocity[1] - previous_local_velocity[1] )*1000000 / delta.microseconds) / 9.81
@@ -469,7 +489,6 @@ while True:
 			tyreSpeedRL = abs(3.6 * tyreDiamRL * telemetry.tire_rps_RL)
 			tyreSpeedRR = abs(3.6 * tyreDiamRR * telemetry.tire_rps_RR)
 
-			#carSpeed = 3.6 * telemetry.speed
 			carSpeed = telemetry.speed
 
 			if carSpeed > 0:
@@ -503,7 +522,7 @@ while True:
 			printAt('{:5.0f}'.format(telemetry.car_code), 10, 48, reverse=1)	# car id
 			printAt('{:3.0f}'.format(telemetry.throttle / 2.55), 12, 11)		# throttle
 			printAt('{:7.0f}'.format(telemetry.rpm), 12, 25)					# rpm
-			printAt('{:7.1f}'.format(carSpeed), 12, 47)							# speed kph
+			printAt('{:7.1f}'.format(carSpeed * 3.6), 12, 47)					# speed kph
 			printAt('{:3.0f}'.format(telemetry.brake / 2.55), 13, 11)			# brake
 			printAt('{}'.format(cgear), 13, 27)									# actual gear
 			printAt('{}'.format(sgear), 13, 30)									# suggested gear
@@ -580,9 +599,9 @@ while True:
 				printAt('{:11.4f}'.format(telemetry.position_y), 31, 28)		# pos Y
 				printAt('{:11.4f}'.format(telemetry.position_z), 32, 28)		# pos Z
 
-				printAt('{:11.4f}'.format(telemetry.world_velocity_x), 30, 43)		# velocity X
-				printAt('{:11.4f}'.format(telemetry.world_velocity_y), 31, 43)		# velocity Y
-				printAt('{:11.4f}'.format(telemetry.world_velocity_z), 32, 43)		# velocity Z
+				printAt('{:11.4f}'.format(telemetry.world_velocity_x * 3.6), 30, 43)		# velocity X
+				printAt('{:11.4f}'.format(telemetry.world_velocity_y * 3.6), 31, 43)		# velocity Y
+				printAt('{:11.4f}'.format(telemetry.world_velocity_z * 3.6), 32, 43)		# velocity Z
 
 				printAt('{:9.4f}'.format(pitch), 35, 28)			# rot Pitch
 				printAt('{:9.4f}'.format(yaw), 36, 28)			# rot Yaw
@@ -598,9 +617,9 @@ while True:
 
 				printAt('{:9.4f}'.format(slip_angle), 40, 45)
 
-				printAt('{:9.4f}'.format(Local_Velocity[0]), 30, 60)		# Loval velocity X
-				printAt('{:9.4f}'.format(Local_Velocity[1]), 31, 60)		# Loval velocity  Y
-				printAt('{:9.4f}'.format(Local_Velocity[2]), 32, 60)		# Loval velocity  Z
+				printAt('{:9.4f}'.format(Local_Velocity[0]*3.6), 30, 60)		# Loval velocity X
+				printAt('{:9.4f}'.format(Local_Velocity[1]*3.6), 31, 60)		# Loval velocity  Y
+				printAt('{:9.4f}'.format(Local_Velocity[2]*3.6), 32, 60)		# Loval velocity  Z
 
 				printAt('{:9.4f}'.format(accel_x), 35, 65)		# acceleration X
 				printAt('{:9.4f}'.format(accel_y), 36, 65)		# acceleration Y

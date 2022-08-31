@@ -60,9 +60,12 @@ The GT7Proxy.exe will be located in the dist folder.
 
 Without all great [GTPlanet](https://www.gtplanet.net/forum/threads/gt7-is-compatible-with-motion-rig.410728/) contributors this wouldn't have been possible. Kudos to all the guys there !
 
+Especially for the quaternion part, as Polyphony Digital provides telemetry data based on quaternion model. Quaternion extends complex numbers as per wikipedia https://en.wikipedia.org/wiki/Quaternion. Extending complexity is far beyond my brain capacity :D
+Without assistance from Skinny McLean, tarnheld, nokazito and magicfr my motion rig would be silent.
+Without poumpoum starting the thread and Nenkai starting reverse-engineering, there would be no telemetry at all.
+Without all other contributors, we would still be wondering how to interpret and use telemetry in a efficient and fun way. Once again, thanks to all of you !
+
 Keep in mind that this is an undocumented API from Grand Turismo Series, the game developer
 might patch the game and close the door in the future.
 
 Enjoy!
-
-
