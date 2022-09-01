@@ -75,13 +75,14 @@ parser.add_argument("--xsimoutput",
 
 args = parser.parse_args()
 
-# Create a UDP socket and bind it
+# Create a UDP socket and bind it to connect to GT7
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 s.bind(('0.0.0.0', ReceivePort))
 s.settimeout(5)
 
+# Create a UDP socket to forward telemetry to XSim GT7 plugin
 xsim_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 xsim_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 xsim_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -174,7 +175,8 @@ class LapCounter:
         return round(laptime,3)
 
 
-#Misc functions to help in calculating roll/pitch/yaw heave/sway/surge based on Quaternion algebra
+#Misc functions to help in calculating roll/pitch/yaw heave/sway/surge based on Quaternion notions
+
 def quat_conj(Q):
 	return (-Q[0],-Q[1],-Q[2],Q[3])
 def quat_vec(Q):
@@ -317,11 +319,6 @@ if not args.silent:
 
 sys.stdout.flush()
 
-prevlap = -1
-pktid = 0
-pknt = 0
-previousts = datetime.datetime.now()
-
 # Create output files if needed
 if args.logpackets:
 	f1 = open("GT7packets.cap", 'wb')
@@ -332,6 +329,11 @@ if args.csvoutput:
 	csvfilexsim = open("GT7dataXsim.csv", 'w')
 	csvfilexsim.write("speed,world_x,world_y,world_z,pitch,yaw,roll,northorientation,world_velocity_x,world_velocity_y,world_velocity_z,local_velo_lateral,local_velo_up,local_velo_forward,accel_x,accel_y,accel_z,slip\n")
 
+
+prevlap = -1
+pktid = 0
+pknt = 0
+previousts = datetime.datetime.now()
 delta = 0
 udppackets = 0
 lapcounter = LapCounter()
@@ -339,13 +341,15 @@ previous_local_velocity = (0,0,0)
 accel_x = 0
 accel_y = 0
 accel_z = 0
-accel = (0,0,0)
 csvheader = True
 slip_angle = 0
 
 while True:
 	try:
 		data, address = s.recvfrom(4096)
+		if pknt == 0: # Init time reference upon first packet received
+			previousts = datetime.datetime.now()
+		pknt = pknt + 1
 		ts = datetime.datetime.now()
 		delta = ts - previousts
 		previousts = ts
@@ -354,7 +358,6 @@ while True:
 			record = [previoustime, delta, data]
 			pickle.dump(record, f1)
 			f2.write(data)
-		pknt = pknt + 1
 		ddata = salsa20_dec(data)
 		telemetry = GTDataPacket(ddata[0:296])
 		if len(ddata) > 0 and telemetry.pkt_id > pktid:
@@ -377,11 +380,7 @@ while True:
 				curLapTime = 0
 				printAt('{:>9}'.format(''), 7, 49)
 			
-			#pitch = math.degrees(telemetry.rotation_x*np.pi)
-			#yaw = math.degrees(telemetry.rotation_y*np.pi)
-			#roll = math.degrees(telemetry.rotation_z*np.pi)
-			
-			#Calculate local velocity based on quartenion & Co
+			#Calculate local velocity based on quaternion
 			P=(telemetry.position_x,telemetry.position_y,telemetry.position_z)
 			V=(telemetry.world_velocity_x,telemetry.world_velocity_y,telemetry.world_velocity_z)
 			Q=(telemetry.rotation_x,telemetry.rotation_y,telemetry.rotation_z,telemetry.northorientation)
@@ -392,9 +391,10 @@ while True:
 			else:
 				slip_angle=0
 			
-			#Calculate roll/pitch/yaw based on quartenion & Co
+			#Calculate roll/pitch/yaw based on quaternion
 			roll,pitch,yaw = roll_pitch_yaw(Q)
 			
+			#Compute acceleration in G
 			if delta.microseconds != 0:
 				accel_x=((Local_Velocity[0] - previous_local_velocity[0] )*1000000 / delta.microseconds) / 9.81 
 				accel_y=((Local_Velocity[1] - previous_local_velocity[1] )*1000000 / delta.microseconds) / 9.81
@@ -413,13 +413,13 @@ while True:
 								telemetry.rpm,
 								telemetry.max_alert_rpm,
 								cgear,
-								roll, # roll
-								yaw, # yaw
-								pitch, # pitch
+								roll, # roll in °
+								yaw, # yaw in °
+								pitch, # pitch in °
 								accel_z , # surge in G
 								accel_y , # heave in G
 								accel_x , # sway in G
-								slip_angle, # Traction Loss in degree
+								slip_angle, # Traction Loss in °
 								telemetry.oil_temperature,
 								telemetry.oil_pressure_bar,
 								telemetry.water_temperature,
