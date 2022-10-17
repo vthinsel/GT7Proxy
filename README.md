@@ -15,7 +15,9 @@ PlayStation 4/5 (port 33749) -> GT7Proxy (port 33740) -> XSim plugin (port 33800
 
 To run the script via Python, you need to have at least the version 3.9 installed and a couple of dependencies
 Clone this repository and install all dependencies:
-pip install -r requirements.txt
+``pip install -r requirements.txt``
+You will need to install Visual C++ Build Tools using ``Visual Studio Installer`` from [here](https://visualstudio.microsoft.com/fr/downloads/).
+Once the requirements are correctly installed, you may need to add the directory with pyinstaller.exe in the PATH
 
 Then run the proxy with at least one argument representing the PlayStation/Whatever IP:
 
@@ -53,7 +55,7 @@ The csvoutput option will generate a CSV file called GT7data.csv which you can o
 ## Building a standalone executable
 
 To build an executables install the dependencies and run:
-pyinstaller GT7Proxy.spec   
+``pyinstaller GT7Proxy.spec``
 The GT7Proxy.exe will be located in the dist folder.
 
 ## Credits
