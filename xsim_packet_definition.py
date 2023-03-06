@@ -64,7 +64,11 @@ class TelemetryPacket(Structure):
                 ('suspvelocityFR', c_float),
                 ('suspvelocityRL', c_float),
                 ('suspvelocityRR', c_float),
-                ('lights',c_bool), 
+                ('lights',c_bool),
+                ('lowbeam', c_bool),
+                ('highbeam', c_bool),
+                ('load_process', c_bool),
+
                 ]
     def __iter__(self):
         #return iter([self.position_x, self.position_y, self.position_z])
