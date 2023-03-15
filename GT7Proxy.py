@@ -1,18 +1,20 @@
 import argparse
+import codecs
 import csv
-from math import atan2, copysign, cos, sin
+import datetime
 import math
+import pickle
 import signal
+import socket
+import struct
+import sys
 from datetime import datetime as dt
 from datetime import timedelta as td
-import socket
-import sys
-import codecs
-import struct
+
+import numpy as np
 from salsa20 import Salsa20_xor
-import datetime
-import pickle
-import time
+from scipy.spatial.transform import Rotation
+
 from gt_packet_definition import GTDataPacket
 from xsim_packet_definition import TelemetryPacket, PACKET_HEADER, API_VERSION
 
@@ -29,7 +31,6 @@ ReceivePort = 33740
 
 
 # ctrl-c handler
-
 
 def handler(signum, frame):
     sys.stdout.write(f'{pref}?1049l')  # revert buffer
@@ -118,15 +119,10 @@ def salsa20_dec(dat):
     return ddata
 
 
-# send heartbeat
-
-
 def send_hb(s):
     send_data = 'A'
     s.sendto(send_data.encode('utf-8'), (args.ps_ip, SendPort))
 
-
-# print('send heartbeat')
 
 # generic print function
 
@@ -203,69 +199,39 @@ class LapCounter:
 # Misc functions to help in calculating roll/pitch/yaw heave/sway/surge based on Quaternion notions
 
 def quat_conj(Q):
-    return (-Q[0], -Q[1], -Q[2], Q[3])
+    return -Q[0], -Q[1], -Q[2], Q[3]
 
 
-def quat_vec(Q):
-    return (Q[0], Q[1], Q[2])
+# Normalize the quaternion
+def roll_pitch_yaw(P):
+    q = (P[3], P[2], P[0], P[1])
+    q_norm = q / np.linalg.norm(q)
+
+    # Compute the roll, pitch, and yaw angles in radians
+    loc_roll = math.atan2(2 * (q_norm[0] * q_norm[1] + q_norm[2] * q_norm[3]), 1 - 2 * (q_norm[1] ** 2 + q_norm[2] ** 2))
+    loc_pitch = math.asin(2 * (q_norm[0] * q_norm[2] - q_norm[3] * q_norm[1]))
+    loc_yaw = math.atan2(2 * (q_norm[0] * q_norm[3] + q_norm[1] * q_norm[2]), 1 - 2 * (q_norm[2] ** 2 + q_norm[3] ** 2))
+
+    # Convert the angles from radians to degrees
+    roll_deg = loc_roll * 180.0 / math.pi
+    pitch_deg = loc_pitch * 180.0 / math.pi
+    yaw_deg = loc_yaw * 180.0 / math.pi
+    return roll_deg, pitch_deg, yaw_deg
 
 
-def quat_scalar(Q):
-    return Q[3]
+def worldvelo_to_localvelo(q, v_world):
+    # Convert quaternion to rotation matrix
+    r = Rotation.from_quat(q)
+    R = r.as_matrix()
 
-
-def cross(A, B):
-    return (A[1] * B[2] - A[2] * B[1], A[2] * B[0] - A[0] * B[2], A[0] * B[1] - A[1] * B[0])
-
-
-def add(A, B):
-    return (A[0] + B[0], A[1] + B[1], A[2] + B[2])
-
-
-def sub(A, B):
-    return (A[0] - B[0], A[1] - B[1], A[2] - B[2])
-
-
-def scale(A, s):
-    return (A[0] * s, A[1] * s, A[2] * s)
-
-
-def quat_rot(V, Q):
-    Qv = quat_vec(Q)
-    U = cross(Qv, V)
-    w = quat_scalar(Q)
-    P = add(U, scale(V, w))
-    T = scale(Qv, 2)
-    RR = cross(T, P)
-    R = add(V, RR)
-    return R
-
-
-def roll_pitch_yaw(Q):
-    # see http://www.euclideanspace.com/maths/geometry/rotations/conversions/quaternionToEuler/Quaternions.pdf
-    # permute quaternion coefficients to determine
-    # order of roll/pitch/yaw rotation axes, scalar comes first always
-    P = (Q[3], Q[2], Q[0], Q[1])
-    # e is for handedness of axes
-    e = -1
-    x_p = 2 * (P[0] * P[2] + e * P[1] * P[3])
-    pitch = math.asin(x_p)
-    if math.isclose(math.fabs(pitch), math.pi / 2):
-        # handle singularity when pitch is +-90°
-        yaw = 0
-        roll = math.atan2(P[1], P[0])
-    else:
-        y_r = 2 * (P[0] * P[1] - e * P[2] * P[3])
-        x_r = 1 - 2 * (P[1] * P[1] + P[2] * P[2])
-        roll = math.atan2(y_r, x_r)
-        y_y = 2 * (P[0] * P[3] - e * P[1] * P[2])
-        x_y = 1 - 2 * (P[2] * P[2] + P[3] * P[3])
-        yaw = math.atan2(y_y, x_y)
-    return (roll * 180 / math.pi, pitch * 180 / math.pi, yaw * 180 / math.pi)
+    # Calculate local velocity vector
+    v_local = np.dot(R, v_world)
+    return v_local
 
 
 def get_bit(value, n):
     return (value >> n & 1) != 0
+
 
 # start by sending heartbeat to wake-up GT7 telemetry stack
 send_hb(s)
@@ -445,13 +411,13 @@ while True:
                 printAt('{:>9}'.format(''), 7, 49)
 
             # Calculate local velocity based on quaternion
-            P = (telemetry.position_x, telemetry.position_y, telemetry.position_z)
+            # P = (telemetry.position_x, telemetry.position_y, telemetry.position_z)
             V = (telemetry.world_velocity_x,
                  telemetry.world_velocity_y, telemetry.world_velocity_z)
             Q = (telemetry.rotation_x, telemetry.rotation_y,
                  telemetry.rotation_z, telemetry.northorientation)
             Qc = quat_conj(Q)
-            Local_Velocity = quat_rot(V, Qc)
+            Local_Velocity = worldvelo_to_localvelo(Qc, V)
             if Local_Velocity[2] != 0:
                 slip_angle = math.degrees(
                     math.atan(Local_Velocity[0] / abs(Local_Velocity[2])))
