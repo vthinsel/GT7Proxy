@@ -208,7 +208,8 @@ def roll_pitch_yaw(P):
     q_norm = q / np.linalg.norm(q)
 
     # Compute the roll, pitch, and yaw angles in radians
-    loc_roll = math.atan2(2 * (q_norm[0] * q_norm[1] + q_norm[2] * q_norm[3]), 1 - 2 * (q_norm[1] ** 2 + q_norm[2] ** 2))
+    loc_roll = math.atan2(2 * (q_norm[0] * q_norm[1] + q_norm[2] * q_norm[3]),
+                          1 - 2 * (q_norm[1] ** 2 + q_norm[2] ** 2))
     loc_pitch = math.asin(2 * (q_norm[0] * q_norm[2] - q_norm[3] * q_norm[1]))
     loc_yaw = math.atan2(2 * (q_norm[0] * q_norm[3] + q_norm[1] * q_norm[2]), 1 - 2 * (q_norm[2] ** 2 + q_norm[3] ** 2))
 
@@ -236,7 +237,7 @@ def get_bit(value, n):
 # start by sending heartbeat to wake-up GT7 telemetry stack
 send_hb(s)
 
-printAt('GT7 Telemetry Display and XSim Proxy 1.0 (ctrl-c to quit)', 1, 1, bold=1)
+printAt('GT7 Telemetry Display and XSim Proxy 1.1 (ctrl-c to quit)', 1, 1, bold=1)
 printAt('Packet ID:', 1, 73)
 printAt('{:<92}'.format('Current Track Data'), 3, 1, reverse=1, bold=1)
 printAt('Time on track:', 3, 41, reverse=1)
