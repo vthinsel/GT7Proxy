@@ -237,7 +237,7 @@ def get_bit(value, n):
 # start by sending heartbeat to wake-up GT7 telemetry stack
 send_hb(s)
 
-printAt('GT7 Telemetry Display and XSim Proxy 1.4 (ctrl-c to quit)', 1, 1, bold=1)
+printAt('GT7 Telemetry Display and XSim Proxy 1.5 (ctrl-c to quit)', 1, 1, bold=1)
 printAt('Packet ID:', 1, 73)
 printAt('{:<92}'.format('Current Track Data'), 3, 1, reverse=1, bold=1)
 printAt('Time on track:', 3, 41, reverse=1)
