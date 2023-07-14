@@ -98,7 +98,6 @@ xsim_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 xsim_client_address = (args.xsim_ip, args.xsim_port)
 xsim_socket.settimeout(5)
 
-
 # data stream decoding
 
 
@@ -122,7 +121,6 @@ def salsa20_dec(dat):
 def send_hb(s):
     send_data = 'A'
     s.sendto(send_data.encode('utf-8'), (args.ps_ip, SendPort))
-
 
 # generic print function
 
@@ -355,13 +353,14 @@ accel_x = 0
 accel_y = 0
 accel_z = 0
 csvheader = True
+seenpacket = False
 slip_angle = 0
-sampling_rate = 1/(60)
+sampling_rate = 1/60
 
 while True:
     try:
         data, address = s.recvfrom(4096)
-        if pknt == 0:  # Init time reference upon first packet received
+        if seenpacket == False:  # Init time reference upon first packet received
             previousts = datetime.datetime.now()
         pknt = pknt + 1
         ts = datetime.datetime.now()
@@ -375,25 +374,6 @@ while True:
         ddata = salsa20_dec(data)
         telemetry = GTDataPacket(ddata[0:296])
         if len(ddata) > 0 and telemetry.pkt_id > pktid:
-            # x, z = telemetry.position_x, telemetry.position_z
-            # if px is None:
-            # px, pz = x, z
-            # continue
-
-            # here we're getting the ratio of how fast the car's going compared to it's max speed.
-            # we're multiplying by 3 to boost the colorization range.
-            # speed = min(1, telemetry.speed / telemetry.calculated_max_speed) * 3
-            # Now use the "speed" ratio to select the color from the Matplotlib pallet
-            # color = plt.cm.plasma(speed)
-
-            # plot the current step
-            # plt.plot([px, x], [pz,  z], color=color)
-            # set the aspect ratios to be equal for x/z axis, this way the map doesn't look skewed
-            # plt.gca().set_aspect('equal', adjustable='box')
-            # pause for a freakishly shot amount of time. We need a pause so that it'll trigger a graph update
-            # plt.pause(0.00000000000000000001)
-            # set the previous (x, z) to the current (x, z)
-            # px, pz = x, z
             pktid = telemetry.pkt_id
             bstlap = telemetry.best_lap_time
             lstlap = telemetry.last_lap_time
@@ -416,40 +396,29 @@ while True:
                 printAt('{:>9}'.format(''), 7, 49)
 
             # Calculate local velocity based on quaternion
-            # P = (telemetry.position_x, telemetry.position_y, telemetry.position_z)
             V = (telemetry.world_velocity_x,
                  telemetry.world_velocity_y, telemetry.world_velocity_z)
             Q = (telemetry.rotation_x, telemetry.rotation_y,
                  telemetry.rotation_z, telemetry.northorientation)
             Qc = quat_conj(Q)
             Local_Velocity = worldvelo_to_localvelo(Qc, V)
-            """ if delta.microseconds != 0:
-                accel_x = ((Local_Velocity[0] - previous_local_velocity[0])
-                           * 1000000 / delta.microseconds) / 9.81
-                accel_y = ((Local_Velocity[1] - previous_local_velocity[1])
-                           * 1000000 / delta.microseconds) / 9.81
-                accel_z = ((Local_Velocity[2] - previous_local_velocity[2])
-                           * 1000000 / delta.microseconds) / 9.81 """
-            if pknt > 2:
+            # Compute acceleration in G based on velocity update between two samples at fixed interval
+            if seenpacket:
                 delta_velocity = np.subtract(
                     Local_Velocity, previous_local_velocity)
                 acceleration_vector = np.divide(delta_velocity, sampling_rate)
-                acceleration_vector = np.divide(acceleration_vector, 9.8)
+                acceleration_vector = np.divide(
+                    acceleration_vector, 9.8)  # Turn into G force
                 accel_x = acceleration_vector[0]
                 accel_y = acceleration_vector[1]
                 accel_z = acceleration_vector[2]
-                if Local_Velocity[2] != 0:
+                if Local_Velocity[2] != 0 and Local_Velocity[1] != 0 and Local_Velocity[0] != 0:
                     slip_angle = math.degrees(
                         math.atan(Local_Velocity[0] / abs(Local_Velocity[2])))
-                else:
-                    slip_angle = 0
             previous_local_velocity = Local_Velocity
 
             # Calculate roll/pitch/yaw based on quaternion
             roll, pitch, yaw = roll_pitch_yaw(Q)
-
-            # Compute acceleration in G
-
             if args.csvoutput:
                 csvfilexsim.write(
                     f"{delta.microseconds},{telemetry.speed},{telemetry.position_x},{telemetry.position_y},{telemetry.position_z},{pitch},{yaw},{roll},{telemetry.northorientation},{telemetry.world_velocity_x},{telemetry.world_velocity_y},{-telemetry.world_velocity_z},{Local_Velocity[0]},{Local_Velocity[1]},{Local_Velocity[2]},{accel_x},{accel_y},{accel_z},{slip_angle}\n")
@@ -539,22 +508,17 @@ while True:
                 cgear = 'R'
             if sgear > 14:
                 sgear = '–'
-
             boost = telemetry.boost - 1
             hasTurbo = True if boost > -1 else False
-
             tyreDiamFL = telemetry.tire_radius_FL
             tyreDiamFR = telemetry.tire_radius_FR
             tyreDiamRL = telemetry.tire_radius_RL
             tyreDiamRR = telemetry.tire_radius_RR
-
             tyreSpeedFL = abs(3.6 * tyreDiamFL * telemetry.tire_rps_FL)
             tyreSpeedFR = abs(3.6 * tyreDiamFR * telemetry.tire_rps_FR)
             tyreSpeedRL = abs(3.6 * tyreDiamRL * telemetry.tire_rps_RL)
             tyreSpeedRR = abs(3.6 * tyreDiamRR * telemetry.tire_rps_RR)
-
             carSpeed = telemetry.speed
-
             if carSpeed > 0:
                 tyreSlipRatioFL = '{:6.2f}'.format(tyreSpeedFL / carSpeed)
                 tyreSlipRatioFR = '{:6.2f}'.format(tyreSpeedFR / carSpeed)
@@ -565,19 +529,15 @@ while True:
                 tyreSlipRatioFR = '  –  '
                 tyreSlipRatioRL = '  -  '
                 tyreSlipRatioRR = '  –  '
-
             printAt('{:>8}'.format(str(td(seconds=round(telemetry.day_progression_ms / 1000)))),
                     3, 56, reverse=1)  # time of day on track
-
             printAt('{:3.0f}'.format(curlap), 5, 7)  # current lap
             printAt('{:3.0f}'.format(telemetry.total_laps),
                     5, 11)  # total laps
-
             printAt('{:2.0f}'.format(telemetry.pre_race_start_position),
                     5, 31)  # current position
             printAt('{:2.0f}'.format(telemetry.pre_race_num_cars),
                     5, 34)  # total positions
-
             if bstlap != -1:
                 printAt('{:>9}'.format(secondsToLaptime(
                     bstlap / 1000)), 7, 16)  # best lap time
@@ -628,24 +588,20 @@ while True:
                         12, 83)  # rpm rev warning
                 printAt('{:5.0f}'.format(telemetry.calculated_max_speed),
                         14, 83)  # estimated top speed
-
                 printAt('{:5.3f}'.format(
                     telemetry.clutch_pedal), 15, 9)  # clutch
                 printAt('{:5.3f}'.format(telemetry.clutch_engagement),
                         15, 17)  # clutch engaged
                 printAt('{:7.0f}'.format(telemetry.rpm_clutch_gearbox),
                         15, 48)  # rpm after clutch
-
                 printAt('{:6.1f}'.format(telemetry.oil_temperature),
                         17, 17)  # oil temp
                 printAt('{:6.1f}'.format(telemetry.water_temperature),
                         17, 49)  # water temp
-
                 printAt('{:6.2f}'.format(telemetry.oil_pressure_bar),
                         18, 17)  # oil pressure
                 printAt('{:6.0f}'.format(1000 * telemetry.body_height),
                         18, 49)  # ride height
-
                 printAt('{:6.1f}'.format(telemetry.tire_temp_FL),
                         21, 5)  # tyre temp FL
                 printAt('{:6.1f}'.format(telemetry.tire_temp_FR),
@@ -654,7 +610,6 @@ while True:
                         25, 5)  # tyre temp RL
                 printAt('{:6.1f}'.format(telemetry.tire_temp_RR),
                         25, 25)  # tyre temp RR
-
                 printAt('{:6.1f}'.format(200 * tyreDiamFL),
                         21, 43)  # tyre diameter FL
                 printAt('{:6.1f}'.format(200 * tyreDiamFR),
@@ -663,17 +618,14 @@ while True:
                         25, 43)  # tyre diameter RL
                 printAt('{:6.1f}'.format(200 * tyreDiamRR),
                         25, 50)  # tyre diameter RR
-
                 printAt('{:6.1f}'.format(tyreSpeedFL), 22, 5)  # tyre speed FL
                 printAt('{:6.1f}'.format(tyreSpeedFR), 22, 25)  # tyre speed FR
                 printAt('{:6.1f}'.format(tyreSpeedRL), 26, 5)  # tyre speed RL
                 printAt('{:6.1f}'.format(tyreSpeedRR), 26, 25)  # tyre speed RR
-
                 printAt(tyreSlipRatioFL, 22, 43)  # tyre slip ratio FL
                 printAt(tyreSlipRatioFR, 22, 50)  # tyre slip ratio FR
                 printAt(tyreSlipRatioRL, 26, 43)  # tyre slip ratio RL
                 printAt(tyreSlipRatioRR, 26, 50)  # tyre slip ratio RR
-
                 printAt('{:6.3f}'.format(telemetry.susp_height_FL),
                         23, 5)  # suspension FL
                 printAt('{:6.3f}'.format(telemetry.susp_height_FR),
@@ -682,7 +634,6 @@ while True:
                         27, 5)  # suspension RL
                 printAt('{:6.3f}'.format(telemetry.susp_height_RR),
                         27, 25)  # suspension RR
-
                 printAt('{:7.3f}'.format(
                     telemetry.gear_ratio1), 30, 5)  # 1st gear
                 printAt('{:7.3f}'.format(
@@ -699,51 +650,41 @@ while True:
                     telemetry.gear_ratio7), 36, 5)  # 7th gear
                 printAt('{:7.3f}'.format(
                     telemetry.gear_ratio8), 37, 5)  # 8th gear
-
                 printAt('{:7.3f}'.format(
                     telemetry.transmission_top_speed), 39, 5)  # ??? gear
-
                 printAt('{:11.4f}'.format(
                     telemetry.position_x), 30, 28)  # pos X
                 printAt('{:11.4f}'.format(
                     telemetry.position_y), 31, 28)  # pos Y
                 printAt('{:11.4f}'.format(
                     telemetry.position_z), 32, 28)  # pos Z
-
                 printAt('{:11.4f}'.format(telemetry.world_velocity_x * 3.6),
                         30, 43)  # velocity X
                 printAt('{:11.4f}'.format(telemetry.world_velocity_y * 3.6),
                         31, 43)  # velocity Y
                 printAt('{:11.4f}'.format(telemetry.world_velocity_z * 3.6),
                         32, 43)  # velocity Z
-
                 printAt('{:9.4f}'.format(pitch), 35, 28)  # rot Pitch
                 printAt('{:9.4f}'.format(yaw), 36, 28)  # rot Yaw
                 printAt('{:9.4f}'.format(roll), 37, 28)  # rot Roll
                 # printAt('{:9.4f}'.format(telemetry.rotation_x), 35, 28)			# rot Pitch
                 # printAt('{:9.4f}'.format(telemetry.rotation_y), 36, 28)			# rot Yaw
                 # printAt('{:9.4f}'.format(telemetry.rotation_z), 37, 28)			# rot Roll
-
                 printAt('{:9.4f}'.format(telemetry.angularvelocity_x), 35, 45)
                 printAt('{:9.4f}'.format(telemetry.angularvelocity_y), 36, 45)
                 printAt('{:9.4f}'.format(telemetry.angularvelocity_z), 37, 45)
-
                 printAt('{:9.4f}'.format(slip_angle), 40, 45)
-
-                # Loval velocity X
+                # Local velocity X
                 printAt('{:9.4f}'.format(Local_Velocity[0] * 3.6), 30, 60)
-                # Loval velocity  Y
+                # Local velocity  Y
                 printAt('{:9.4f}'.format(Local_Velocity[1] * 3.6), 31, 60)
-                # Loval velocity  Z
+                # Local velocity  Z
                 printAt('{:9.4f}'.format(Local_Velocity[2] * 3.6), 32, 60)
-
                 printAt('{:9.4f}'.format(accel_x), 35, 65)  # acceleration X
                 printAt('{:9.4f}'.format(accel_y), 36, 65)  # acceleration Y
                 printAt('{:9.4f}'.format(accel_z), 37, 65)  # acceleration Z
-
                 printAt('{:7.4f}'.format(
                     telemetry.northorientation), 39, 25)  # rot ???
-
                 # various flags (see https://github.com/Nenkai/PDTools/blob/master/PDTools.SimulatorInterface/SimulatorPacketG7S0.cs)
                 printAt('0x8E BITS  =  {:0>8}'.format(
                     bin(struct.unpack('B', ddata[0x8E:0x8E + 1])[0])[2:]), 23, 71)
@@ -752,7 +693,6 @@ while True:
                     bin(struct.unpack('B', ddata[0x8F:0x8F + 1])[0])[2:]), 24, 71)
                 printAt('0x93 BITS  =  {:0>8}'.format(
                     bin(struct.unpack('B', ddata[0x93:0x93 + 1])[0])[2:]), 25, 71)  # 0x93 = ???
-
                 printAt('Map X {:11.5f}'.format(
                     telemetry.road_plane_x), 27, 73)  # 0x94 = ???
                 printAt('Map Y {:11.5f}'.format(
@@ -761,7 +701,6 @@ while True:
                     telemetry.road_plane_z), 29, 73)  # 0x9C = ???
                 printAt('Map Dist {:11.5f}'.format(
                     telemetry.road_plane_dist), 30, 73)  # 0xA0 = ???
-
         # printAt('0xD4 FLOAT {:11.5f}'.format(struct.unpack('f', ddata[0xD4:0xD4+4])[0]), 32, 71)			# 0xD4 = ???
         # printAt('0xD8 FLOAT {:11.5f}'.format(struct.unpack('f', ddata[0xD8:0xD8+4])[0]), 33, 71)			# 0xD8 = ???
         # printAt('0xDC FLOAT {:11.5f}'.format(struct.unpack('f', ddata[0xDC:0xDC+4])[0]), 34, 71)			# 0xDC = ???
@@ -771,7 +710,7 @@ while True:
         # printAt('0xE8 FLOAT {:11.5f}'.format(struct.unpack('f', ddata[0xE8:0xE8+4])[0]), 37, 71)			# 0xE8 = ???
         # printAt('0xEC FLOAT {:11.5f}'.format(struct.unpack('f', ddata[0xEC:0xEC+4])[0]), 38, 71)			# 0xEC = ???
         # printAt('0xF0 FLOAT {:11.5f}'.format(struct.unpack('f', ddata[0xF0:0xF0+4])[0]), 39, 71)			# 0xF0 = ???#
-
+        seenpacket = True
         if pknt > 100:
             send_hb(s)
             pknt = 0
