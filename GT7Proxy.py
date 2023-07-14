@@ -192,7 +192,8 @@ class LapCounter:
             return self.tick - self.lstart_tick - self.pausedticks()
 
     def laptime(self):
-        laptime = (self.lapticks() * 1. / 60.) - (self.special_packet_time / 1000.)
+        laptime = (self.lapticks() * 1. / 60.) - \
+            (self.special_packet_time / 1000.)
         return round(laptime, 3)
 
 
@@ -211,7 +212,8 @@ def roll_pitch_yaw(P):
     loc_roll = math.atan2(2 * (q_norm[0] * q_norm[1] + q_norm[2] * q_norm[3]),
                           1 - 2 * (q_norm[1] ** 2 + q_norm[2] ** 2))
     loc_pitch = math.asin(2 * (q_norm[0] * q_norm[2] - q_norm[3] * q_norm[1]))
-    loc_yaw = math.atan2(2 * (q_norm[0] * q_norm[3] + q_norm[1] * q_norm[2]), 1 - 2 * (q_norm[2] ** 2 + q_norm[3] ** 2))
+    loc_yaw = math.atan2(2 * (q_norm[0] * q_norm[3] + q_norm[1]
+                         * q_norm[2]), 1 - 2 * (q_norm[2] ** 2 + q_norm[3] ** 2))
 
     # Convert the angles from radians to degrees
     roll_deg = loc_roll * 180.0 / math.pi
@@ -237,7 +239,7 @@ def get_bit(value, n):
 # start by sending heartbeat to wake-up GT7 telemetry stack
 send_hb(s)
 
-printAt('GT7 Telemetry Display and XSim Proxy 1.5 (ctrl-c to quit)', 1, 1, bold=1)
+printAt('GT7 Telemetry Display and XSim Proxy 1.6 (ctrl-c to quit)', 1, 1, bold=1)
 printAt('Packet ID:', 1, 73)
 printAt('{:<92}'.format('Current Track Data'), 3, 1, reverse=1, bold=1)
 printAt('Time on track:', 3, 41, reverse=1)
@@ -339,7 +341,7 @@ if args.csvoutput:
     csvwriter = csv.writer(csvfile)
     csvfilexsim = open("GT7dataXsim.csv", 'w')
     csvfilexsim.write(
-        "speed,world_x,world_y,world_z,pitch,yaw,roll,northorientation,world_velocity_x,world_velocity_y,world_velocity_z,local_velo_lateral,local_velo_up,local_velo_forward,accel_x,accel_y,accel_z,slip\n")
+        "delta,speed,world_x,world_y,world_z,pitch,yaw,roll,northorientation,world_velocity_x,world_velocity_y,world_velocity_z,local_velo_lateral,local_velo_up,local_velo_forward,accel_x,accel_y,accel_z,slip\n")
 
 prevlap = -1
 pktid = 0
@@ -354,6 +356,7 @@ accel_y = 0
 accel_z = 0
 csvheader = True
 slip_angle = 0
+sampling_rate = 1/(60)
 
 while True:
     try:
@@ -374,8 +377,8 @@ while True:
         if len(ddata) > 0 and telemetry.pkt_id > pktid:
             # x, z = telemetry.position_x, telemetry.position_z
             # if px is None:
-            #	px, pz = x, z
-            #	continue
+            # px, pz = x, z
+            # continue
 
             # here we're getting the ratio of how fast the car's going compared to it's max speed.
             # we're multiplying by 3 to boost the colorization range.
@@ -395,7 +398,8 @@ while True:
             bstlap = telemetry.best_lap_time
             lstlap = telemetry.last_lap_time
             curlap = telemetry.current_lap
-            paused = get_bit(telemetry.flags, 2)  # second bit in flags is paused
+            # second bit in flags is paused
+            paused = get_bit(telemetry.flags, 2)
             lapcounter.update(curlap, paused, pktid, telemetry.last_lap_time)
             cgear = telemetry.suggestedgear_gear & 0b00001111
             sgear = telemetry.suggestedgear_gear >> 4
@@ -419,31 +423,41 @@ while True:
                  telemetry.rotation_z, telemetry.northorientation)
             Qc = quat_conj(Q)
             Local_Velocity = worldvelo_to_localvelo(Qc, V)
-            if Local_Velocity[2] != 0:
-                slip_angle = math.degrees(
-                    math.atan(Local_Velocity[0] / abs(Local_Velocity[2])))
-            else:
-                slip_angle = 0
-
-            # Calculate roll/pitch/yaw based on quaternion
-            roll, pitch, yaw = roll_pitch_yaw(Q)
-
-            # Compute acceleration in G
-            if delta.microseconds != 0:
+            """ if delta.microseconds != 0:
                 accel_x = ((Local_Velocity[0] - previous_local_velocity[0])
                            * 1000000 / delta.microseconds) / 9.81
                 accel_y = ((Local_Velocity[1] - previous_local_velocity[1])
                            * 1000000 / delta.microseconds) / 9.81
                 accel_z = ((Local_Velocity[2] - previous_local_velocity[2])
-                           * 1000000 / delta.microseconds) / 9.81
-                previous_local_velocity = Local_Velocity
+                           * 1000000 / delta.microseconds) / 9.81 """
+            if pknt > 2:
+                delta_velocity = np.subtract(
+                    Local_Velocity, previous_local_velocity)
+                acceleration_vector = np.divide(delta_velocity, sampling_rate)
+                acceleration_vector = np.divide(acceleration_vector, 9.8)
+                accel_x = acceleration_vector[0]
+                accel_y = acceleration_vector[1]
+                accel_z = acceleration_vector[2]
+                if Local_Velocity[2] != 0:
+                    slip_angle = math.degrees(
+                        math.atan(Local_Velocity[0] / abs(Local_Velocity[2])))
+                else:
+                    slip_angle = 0
+            previous_local_velocity = Local_Velocity
+
+            # Calculate roll/pitch/yaw based on quaternion
+            roll, pitch, yaw = roll_pitch_yaw(Q)
+
+            # Compute acceleration in G
+
             if args.csvoutput:
                 csvfilexsim.write(
-                    f"{telemetry.speed},{telemetry.position_x},{telemetry.position_y},{telemetry.position_z},{pitch},{yaw},{roll},{telemetry.northorientation},{telemetry.world_velocity_x},{telemetry.world_velocity_y},{-telemetry.world_velocity_z},{Local_Velocity[0]},{Local_Velocity[1]},{Local_Velocity[2]},{accel_x},{accel_y},{accel_z},{slip_angle}\n")
+                    f"{delta.microseconds},{telemetry.speed},{telemetry.position_x},{telemetry.position_y},{telemetry.position_z},{pitch},{yaw},{roll},{telemetry.northorientation},{telemetry.world_velocity_x},{telemetry.world_velocity_y},{-telemetry.world_velocity_z},{Local_Velocity[0]},{Local_Velocity[1]},{Local_Velocity[2]},{accel_x},{accel_y},{accel_z},{slip_angle}\n")
             xsim_packet = TelemetryPacket(PACKET_HEADER,
                                           API_VERSION,
                                           str.encode("PS_GT7"),
-                                          str.encode("{}".format(telemetry.car_code)),
+                                          str.encode("{}".format(
+                                              telemetry.car_code)),
                                           str.encode('NA'),
                                           1,
                                           telemetry.speed * 3.6,  # in km/h
@@ -460,12 +474,18 @@ while True:
                                           telemetry.oil_temperature,
                                           telemetry.oil_pressure_bar,
                                           telemetry.water_temperature,
-                                          get_bit(telemetry.flags, 1),  # game paused ?
-                                          get_bit(telemetry.flags, 0),  # on track ?
-                                          get_bit(telemetry.flags, 5),  # rev limit active ?
-                                          get_bit(telemetry.flags, 6),  # Handbrake active ?
-                                          get_bit(telemetry.flags, 10),  # ASM active ?
-                                          get_bit(telemetry.flags, 11),  # TCS active ?
+                                          # game paused ?
+                                          get_bit(telemetry.flags, 1),
+                                          # on track ?
+                                          get_bit(telemetry.flags, 0),
+                                          # rev limit active ?
+                                          get_bit(telemetry.flags, 5),
+                                          # Handbrake active ?
+                                          get_bit(telemetry.flags, 6),
+                                          # ASM active ?
+                                          get_bit(telemetry.flags, 10),
+                                          # TCS active ?
+                                          get_bit(telemetry.flags, 11),
                                           telemetry.throttle,
                                           telemetry.brake,
                                           telemetry.position_x,
@@ -495,10 +515,14 @@ while True:
                                           telemetry.susp_height_FR,
                                           telemetry.susp_height_RL,
                                           telemetry.susp_height_RR,
-                                          get_bit(telemetry.flags, 8),  # Lights on
-                                          get_bit(telemetry.flags, 9),  # lowbeam on
-                                          get_bit(telemetry.flags, 10),  # highbeam on
-                                          get_bit(telemetry.flags, 2),  # load or process on
+                                          # Lights on
+                                          get_bit(telemetry.flags, 8),
+                                          # lowbeam on
+                                          get_bit(telemetry.flags, 9),
+                                          # highbeam on
+                                          get_bit(telemetry.flags, 10),
+                                          # load or process on
+                                          get_bit(telemetry.flags, 2),
                                           )
             if args.csvoutput:
                 if csvheader:
@@ -546,7 +570,8 @@ while True:
                     3, 56, reverse=1)  # time of day on track
 
             printAt('{:3.0f}'.format(curlap), 5, 7)  # current lap
-            printAt('{:3.0f}'.format(telemetry.total_laps), 5, 11)  # total laps
+            printAt('{:3.0f}'.format(telemetry.total_laps),
+                    5, 11)  # total laps
 
             printAt('{:2.0f}'.format(telemetry.pre_race_start_position),
                     5, 31)  # current position
@@ -564,8 +589,10 @@ while True:
             else:
                 printAt('{:>9}'.format(''), 8, 16)
             printAt(str(lapcounter.laptime()), 8, 49)
-            printAt('{:5.0f}'.format(telemetry.car_code), 10, 48, reverse=1)  # car id
-            printAt('{:3.0f}'.format(telemetry.throttle / 2.55), 12, 11)  # throttle
+            printAt('{:5.0f}'.format(telemetry.car_code),
+                    10, 48, reverse=1)  # car id
+            printAt('{:3.0f}'.format(telemetry.throttle / 2.55),
+                    12, 11)  # throttle
             printAt('{:7.0f}'.format(telemetry.rpm), 12, 25)  # rpm
             printAt('{:7.1f}'.format(carSpeed * 3.6), 12, 47)  # speed kph
             printAt('{:3.0f}'.format(telemetry.brake / 2.55), 13, 11)  # brake
@@ -584,11 +611,14 @@ while True:
                             14, 29)  # max battery capacity
                 else:
                     printAt('Fuel:  ', 14, 1)
-                    printAt('{:3.0f} lit'.format(telemetry.fuel_level), 14, 11)  # fuel
-                    printAt('{:3.0f} lit'.format(telemetry.fuel_capacity), 14, 29)  # max fuel
+                    printAt('{:3.0f} lit'.format(
+                        telemetry.fuel_level), 14, 11)  # fuel
+                    printAt('{:3.0f} lit'.format(
+                        telemetry.fuel_capacity), 14, 29)  # max fuel
 
                 if hasTurbo:
-                    printAt('{:7.2f}'.format(telemetry.boost - 1), 13, 47)  # boost
+                    printAt('{:7.2f}'.format(
+                        telemetry.boost - 1), 13, 47)  # boost
                 else:
                     printAt('{:>7}'.format('–'), 13, 47)  # no turbo
 
@@ -599,29 +629,40 @@ while True:
                 printAt('{:5.0f}'.format(telemetry.calculated_max_speed),
                         14, 83)  # estimated top speed
 
-                printAt('{:5.3f}'.format(telemetry.clutch_pedal), 15, 9)  # clutch
+                printAt('{:5.3f}'.format(
+                    telemetry.clutch_pedal), 15, 9)  # clutch
                 printAt('{:5.3f}'.format(telemetry.clutch_engagement),
                         15, 17)  # clutch engaged
                 printAt('{:7.0f}'.format(telemetry.rpm_clutch_gearbox),
                         15, 48)  # rpm after clutch
 
-                printAt('{:6.1f}'.format(telemetry.oil_temperature), 17, 17)  # oil temp
-                printAt('{:6.1f}'.format(telemetry.water_temperature), 17, 49)  # water temp
+                printAt('{:6.1f}'.format(telemetry.oil_temperature),
+                        17, 17)  # oil temp
+                printAt('{:6.1f}'.format(telemetry.water_temperature),
+                        17, 49)  # water temp
 
                 printAt('{:6.2f}'.format(telemetry.oil_pressure_bar),
                         18, 17)  # oil pressure
                 printAt('{:6.0f}'.format(1000 * telemetry.body_height),
                         18, 49)  # ride height
 
-                printAt('{:6.1f}'.format(telemetry.tire_temp_FL), 21, 5)  # tyre temp FL
-                printAt('{:6.1f}'.format(telemetry.tire_temp_FR), 21, 25)  # tyre temp FR
-                printAt('{:6.1f}'.format(telemetry.tire_temp_RL), 25, 5)  # tyre temp RL
-                printAt('{:6.1f}'.format(telemetry.tire_temp_RR), 25, 25)  # tyre temp RR
+                printAt('{:6.1f}'.format(telemetry.tire_temp_FL),
+                        21, 5)  # tyre temp FL
+                printAt('{:6.1f}'.format(telemetry.tire_temp_FR),
+                        21, 25)  # tyre temp FR
+                printAt('{:6.1f}'.format(telemetry.tire_temp_RL),
+                        25, 5)  # tyre temp RL
+                printAt('{:6.1f}'.format(telemetry.tire_temp_RR),
+                        25, 25)  # tyre temp RR
 
-                printAt('{:6.1f}'.format(200 * tyreDiamFL), 21, 43)  # tyre diameter FL
-                printAt('{:6.1f}'.format(200 * tyreDiamFR), 21, 50)  # tyre diameter FR
-                printAt('{:6.1f}'.format(200 * tyreDiamRL), 25, 43)  # tyre diameter RL
-                printAt('{:6.1f}'.format(200 * tyreDiamRR), 25, 50)  # tyre diameter RR
+                printAt('{:6.1f}'.format(200 * tyreDiamFL),
+                        21, 43)  # tyre diameter FL
+                printAt('{:6.1f}'.format(200 * tyreDiamFR),
+                        21, 50)  # tyre diameter FR
+                printAt('{:6.1f}'.format(200 * tyreDiamRL),
+                        25, 43)  # tyre diameter RL
+                printAt('{:6.1f}'.format(200 * tyreDiamRR),
+                        25, 50)  # tyre diameter RR
 
                 printAt('{:6.1f}'.format(tyreSpeedFL), 22, 5)  # tyre speed FL
                 printAt('{:6.1f}'.format(tyreSpeedFR), 22, 25)  # tyre speed FR
@@ -642,20 +683,32 @@ while True:
                 printAt('{:6.3f}'.format(telemetry.susp_height_RR),
                         27, 25)  # suspension RR
 
-                printAt('{:7.3f}'.format(telemetry.gear_ratio1), 30, 5)  # 1st gear
-                printAt('{:7.3f}'.format(telemetry.gear_ratio2), 31, 5)  # 2nd gear
-                printAt('{:7.3f}'.format(telemetry.gear_ratio3), 32, 5)  # 3rd gear
-                printAt('{:7.3f}'.format(telemetry.gear_ratio4), 33, 5)  # 4th gear
-                printAt('{:7.3f}'.format(telemetry.gear_ratio5), 34, 5)  # 5th gear
-                printAt('{:7.3f}'.format(telemetry.gear_ratio6), 35, 5)  # 6th gear
-                printAt('{:7.3f}'.format(telemetry.gear_ratio7), 36, 5)  # 7th gear
-                printAt('{:7.3f}'.format(telemetry.gear_ratio8), 37, 5)  # 8th gear
+                printAt('{:7.3f}'.format(
+                    telemetry.gear_ratio1), 30, 5)  # 1st gear
+                printAt('{:7.3f}'.format(
+                    telemetry.gear_ratio2), 31, 5)  # 2nd gear
+                printAt('{:7.3f}'.format(
+                    telemetry.gear_ratio3), 32, 5)  # 3rd gear
+                printAt('{:7.3f}'.format(
+                    telemetry.gear_ratio4), 33, 5)  # 4th gear
+                printAt('{:7.3f}'.format(
+                    telemetry.gear_ratio5), 34, 5)  # 5th gear
+                printAt('{:7.3f}'.format(
+                    telemetry.gear_ratio6), 35, 5)  # 6th gear
+                printAt('{:7.3f}'.format(
+                    telemetry.gear_ratio7), 36, 5)  # 7th gear
+                printAt('{:7.3f}'.format(
+                    telemetry.gear_ratio8), 37, 5)  # 8th gear
 
-                printAt('{:7.3f}'.format(telemetry.transmission_top_speed), 39, 5)  # ??? gear
+                printAt('{:7.3f}'.format(
+                    telemetry.transmission_top_speed), 39, 5)  # ??? gear
 
-                printAt('{:11.4f}'.format(telemetry.position_x), 30, 28)  # pos X
-                printAt('{:11.4f}'.format(telemetry.position_y), 31, 28)  # pos Y
-                printAt('{:11.4f}'.format(telemetry.position_z), 32, 28)  # pos Z
+                printAt('{:11.4f}'.format(
+                    telemetry.position_x), 30, 28)  # pos X
+                printAt('{:11.4f}'.format(
+                    telemetry.position_y), 31, 28)  # pos Y
+                printAt('{:11.4f}'.format(
+                    telemetry.position_z), 32, 28)  # pos Z
 
                 printAt('{:11.4f}'.format(telemetry.world_velocity_x * 3.6),
                         30, 43)  # velocity X
@@ -688,7 +741,8 @@ while True:
                 printAt('{:9.4f}'.format(accel_y), 36, 65)  # acceleration Y
                 printAt('{:9.4f}'.format(accel_z), 37, 65)  # acceleration Z
 
-                printAt('{:7.4f}'.format(telemetry.northorientation), 39, 25)  # rot ???
+                printAt('{:7.4f}'.format(
+                    telemetry.northorientation), 39, 25)  # rot ???
 
                 # various flags (see https://github.com/Nenkai/PDTools/blob/master/PDTools.SimulatorInterface/SimulatorPacketG7S0.cs)
                 printAt('0x8E BITS  =  {:0>8}'.format(
