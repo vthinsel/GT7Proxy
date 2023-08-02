@@ -25,9 +25,7 @@ if sys.stdout.encoding != 'utf-8':
 if sys.stderr.encoding != 'utf-8':
     sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
 
-# ports for send and receive data
-SendPort = 33739
-ReceivePort = 33740
+
 
 
 # ctrl-c handler
@@ -82,13 +80,23 @@ parser.add_argument("--xsimoutput",
                     default=True,
                     help="Do not send outout to Xsim")
 
+parser.add_argument("--sendport",
+                    type=int,
+                    default=33739,
+                    help="target UDP port used to send data to GT7. Default is 33739. Do not change unless you know what you are doing")
+
+parser.add_argument("--receiveport",
+                    type=int,
+                    default=33740,
+                    help="source UDP port used to send data to GT7. Defaults is 33740. Do not change unless you know what you are doing")
+
 args = parser.parse_args()
 
 # Create a UDP socket and bind it to connect to GT7
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-s.bind(('0.0.0.0', ReceivePort))
+s.bind(('0.0.0.0', args.receiveport))
 s.settimeout(5)
 
 # Create a UDP socket to forward telemetry to XSim GT7 plugin
@@ -120,7 +128,7 @@ def salsa20_dec(dat):
 
 def send_hb(s):
     send_data = 'A'
-    s.sendto(send_data.encode('utf-8'), (args.ps_ip, SendPort))
+    s.sendto(send_data.encode('utf-8'), (args.ps_ip, args.sendport))
 
 # generic print function
 
@@ -237,7 +245,7 @@ def get_bit(value, n):
 # start by sending heartbeat to wake-up GT7 telemetry stack
 send_hb(s)
 
-printAt('GT7 Telemetry Display and XSim Proxy 1.6 (ctrl-c to quit)', 1, 1, bold=1)
+printAt('GT7 Telemetry Display and XSim Proxy 1.7 (ctrl-c to quit)', 1, 1, bold=1)
 printAt('Packet ID:', 1, 73)
 printAt('{:<92}'.format('Current Track Data'), 3, 1, reverse=1, bold=1)
 printAt('Time on track:', 3, 41, reverse=1)

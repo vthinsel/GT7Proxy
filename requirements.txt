@@ -1,6 +1,5 @@
 salsa20~=0.3.0
 pyinstaller
 argparse~=1.4.0
-matplotlib~=3.6.2
 numpy~=1.23.4
 scipy~=1.10.0
