@@ -31,25 +31,30 @@ Or
 
 Detailed usage:
 
-    GT7Proxy.py [-h] --ps_ip PS_IP [--xsim_ip XSIM_IP] [--xsim_port XSIM_PORT] [--logpackets LOGPACKETS] [--csvoutput CSVOUTPUT] [--silent SILENT]
+GT7Proxy.py [-h] --ps_ip PS_IP [--xsim_ip XSIM_IP] [--xsim_port XSIM_PORT] [--logpackets LOGPACKETS] [--csvoutput CSVOUTPUT] [--silent SILENT]
 
-    options:
-  -h, --help            show this help message and exit
-  --ps_ip PS_IP         Playstation 4/5 IP address. Accepts IP or FQDN provided it resolves to something.
-  --xsim_ip XSIM_IP     IP of the computer where XSim is running. Default is 127.0.0.1
-  --xsim_port XSIM_PORT
-                        Port where the XSim plugin is expecting to receive telemetry. Default is 33800
-  --logpackets LOGPACKETS
-                        Optionnaly log packets for future playback using https://github.com/vthinsel/Python_UDP_Receiver/UDPSend_timed.py .Default is False
-  --csvoutput CSVOUTPUT
-                        Optionnaly output data to csv for analysis. Default is False
-  --silent SILENT       limit console output to most usefull data for dashboard. Default is False
-  --xsimoutput XSIMOUTPUT
-                        Do not send outout to Xsim
-  --sendport SENDPORT   target UDP port used to send data to GT7. Do not change unless you know what you are doing
-  --receiveport RECEIVEPORT
-                        source UDP port used to send data to GT7. Do not change unless you know what you are doing
+options:
+`
+-h, --help            show this help message and exit
 
+--ps_ip PS_IP         Playstation 4/5 IP address. Accepts IP or FQDN provided it resolves to something.
+
+--xsim_ip XSIM_IP     IP of the computer where XSim is running. Default is 127.0.0.1
+
+--xsim_port XSIM_PORT  Port where the XSim plugin is expecting to receive telemetry. Default is 33800
+
+--logpackets LOGPACKETS Optionnaly log packets for future playback using https://github.com/vthinsel/Python_UDP_Receiver/UDPSend_timed.py .Default is False
+
+--csvoutput CSVOUTPUT Optionnaly output data to csv for analysis. Default is False
+
+--silent SILENT limit console output to most usefull data for dashboard. Default is False
+
+--xsimoutput XSIMOUTPUT Do not send outout to Xsim
+
+--sendport SENDPORT target UDP port used to send data to GT7. Do not change unless you know what you are doing
+
+--receiveport RECEIVEPORT source UDP port used to send data to GT7. Do not change unless you know what you are doing
+`
 The logpackets will generate two files called GT7packets.cap and GT7packets.raw.cap
 
 GT7packets.cap can be used to replay the UDP stream using UDPSend_timed.py from the [Python_UDP_Receiver](https://github.com/vthinsel/Python_UDP_Receiver)
