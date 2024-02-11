@@ -90,6 +90,11 @@ parser.add_argument("--receiveport",
                     default=33740,
                     help="source UDP port used to send data to GT7. Defaults is 33740. Do not change unless you know what you are doing")
 
+parser.add_argument("--sway_mass",
+                    type=float,
+                    default=80.0,
+                    help="Mass for sway in kg.  Default is 80.0")
+
 args = parser.parse_args()
 
 # Create a UDP socket and bind it to connect to GT7
@@ -364,6 +369,8 @@ csvheader = True
 seenpacket = False
 slip_angle = 0
 sampling_rate = 1/60
+sway = 0
+previous_sway = 0
 
 while True:
     try:
@@ -423,7 +430,32 @@ while True:
                 if Local_Velocity[2] != 0 and Local_Velocity[1] != 0 and Local_Velocity[0] != 0:
                     slip_angle = math.degrees(
                         math.atan(Local_Velocity[0] / abs(Local_Velocity[2])))
+                    
+            # calculate sway value
+            sway = 0
+            w = np.longdouble(telemetry.angularvelocity_y)
+            if w != 0:
+                # calculate radius from tangential velocity
+                #  v = ds/dT
+                # d0 = ds/r
+                #  r = ds/d0
+                v = Local_Velocity[0]    # tangential velocity
+                dT = sampling_rate       # delta time
+                d0 = math.fabs(w / dT)   # delta radians
+                ds = math.fabs(v / dT)   # arc length
+                radius = ds / d0         # radius
+
+                # calculate sway force F
+                # F = mrw^2
+                if radius != 0:
+                    mass = args.sway_mass                     # mass of driver
+                    sway = mass * radius * w * math.fabs(w)   # Fc = mrw^2 ... sway force on driver's mass (keep w sign)
+                    sway /= 9.8                               # sway in terms of G
+                else:
+                    sway = previous_sway
+
             previous_local_velocity = Local_Velocity
+            previous_sway = sway
 
             # Calculate roll/pitch/yaw based on quaternion
             roll, pitch, yaw = roll_pitch_yaw(Q)
@@ -446,7 +478,7 @@ while True:
                                           pitch,  # pitch in °
                                           accel_z,  # surge in G
                                           accel_y,  # heave in G
-                                          accel_x,  # sway in G
+                                          sway,     # sway in G
                                           slip_angle,  # Traction Loss in °
                                           telemetry.oil_temperature,
                                           telemetry.oil_pressure_bar,
