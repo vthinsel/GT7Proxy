@@ -22,13 +22,9 @@ from xsim_packet_definition import TelemetryPacket, PACKET_HEADER, API_VERSION
 pref = "\033["
 if sys.stdout.encoding != 'utf-8':
     sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
-if sys.stderr.encoding != 'utf-8':
-    sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
-
-
-
 
 # ctrl-c handler
+
 
 def handler(signum, frame):
     sys.stdout.write(f'{pref}?1049l')  # revert buffer
@@ -148,7 +144,6 @@ def printAt(text, row=1, column=1, bold=0, underline=0, reverse=0):
 
 
 def secondsToLaptime(seconds):
-    remaining = seconds
     minutes = seconds // 60
     remaining = seconds % 60
     return '{:01.0f}:{:06.3f}'.format(minutes, remaining)
@@ -225,7 +220,7 @@ def roll_pitch_yaw(P):
     roll_deg = loc_roll * 180.0 / math.pi
     pitch_deg = loc_pitch * 180.0 / math.pi
     yaw_deg = loc_yaw * 180.0 / math.pi
-    return roll_deg, pitch_deg, yaw_deg
+    return -roll_deg, -pitch_deg, -yaw_deg
 
 
 def worldvelo_to_localvelo(q, v_world):
@@ -245,7 +240,7 @@ def get_bit(value, n):
 # start by sending heartbeat to wake-up GT7 telemetry stack
 send_hb(s)
 
-printAt('GT7 Telemetry Display and XSim Proxy 1.7 (ctrl-c to quit)', 1, 1, bold=1)
+printAt('GT7 Telemetry Display and XSim Proxy 1.7.2 (ctrl-c to quit)', 1, 1, bold=1)
 printAt('Packet ID:', 1, 73)
 printAt('{:<92}'.format('Current Track Data'), 3, 1, reverse=1, bold=1)
 printAt('Time on track:', 3, 41, reverse=1)
@@ -404,8 +399,8 @@ while True:
                 printAt('{:>9}'.format(''), 7, 49)
 
             # Calculate local velocity based on quaternion
-            V = (telemetry.world_velocity_x,
-                 telemetry.world_velocity_y, telemetry.world_velocity_z)
+            V = (telemetry.world_velocity_x, telemetry.world_velocity_y,
+                  telemetry.world_velocity_z)
             Q = (telemetry.rotation_x, telemetry.rotation_y,
                  telemetry.rotation_z, telemetry.northorientation)
             Qc = quat_conj(Q)
@@ -414,17 +409,16 @@ while True:
             if seenpacket:
                 delta_velocity = np.subtract(
                     Local_Velocity, previous_local_velocity)
+                previous_local_velocity = Local_Velocity
                 acceleration_vector = np.divide(delta_velocity, sampling_rate)
                 acceleration_vector = np.divide(
                     acceleration_vector, 9.8)  # Turn into G force
                 accel_x = acceleration_vector[0]
                 accel_y = acceleration_vector[1]
                 accel_z = acceleration_vector[2]
-                if Local_Velocity[2] != 0 and Local_Velocity[1] != 0 and Local_Velocity[0] != 0:
+                if Local_Velocity[2] != 0 and Local_Velocity[0] != 0:
                     slip_angle = math.degrees(
                         math.atan(Local_Velocity[0] / abs(Local_Velocity[2])))
-            previous_local_velocity = Local_Velocity
-
             # Calculate roll/pitch/yaw based on quaternion
             roll, pitch, yaw = roll_pitch_yaw(Q)
             if args.csvoutput:
@@ -693,10 +687,9 @@ while True:
                 printAt('{:9.4f}'.format(accel_z), 37, 65)  # acceleration Z
                 printAt('{:7.4f}'.format(
                     telemetry.northorientation), 39, 25)  # rot ???
-                # various flags (see https://github.com/Nenkai/PDTools/blob/master/PDTools.SimulatorInterface/SimulatorPacketG7S0.cs)
                 printAt('0x8E BITS  =  {:0>8}'.format(
                     bin(struct.unpack('B', ddata[0x8E:0x8E + 1])[0])[2:]), 23, 71)
-                # various flags (see https://github.com/Nenkai/PDTools/blob/master/PDTools.SimulatorInterface/SimulatorPacketG7S0.cs)
+                # various flags (see https://github.com/Nenkai/PDTools/blob/master/PDTools.SimulatorInterface/SimulatorPacket.cs)
                 printAt('0x8F BITS  =  {:0>8}'.format(
                     bin(struct.unpack('B', ddata[0x8F:0x8F + 1])[0])[2:]), 24, 71)
                 printAt('0x93 BITS  =  {:0>8}'.format(
