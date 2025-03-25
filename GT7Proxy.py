@@ -356,7 +356,7 @@ previous_local_velocity = (0, 0, 0)
 csvheader = True
 seenpacket = False
 slip_angle = 0
-sampling_rate = 1/60
+#sampling_rate = 1/60
 
 while True:
     try:
@@ -408,8 +408,8 @@ while True:
                 delta_velocity = np.subtract(
                     Local_Velocity, previous_local_velocity)
                 previous_local_velocity = Local_Velocity
-                acceleration_vector = np.divide(delta_velocity, sampling_rate)
-                acceleration_vector = np.divide(acceleration_vector, 9.8)  # Turn into G force
+                #acceleration_vector = np.divide(delta_velocity, sampling_rate)
+                #acceleration_vector = np.divide(acceleration_vector, 9.8)  # Turn into G force
                 #accel_x = acceleration_vector[0]
                 #accel_y = acceleration_vector[1]
                 #accel_z = acceleration_vector[2]
