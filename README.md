@@ -4,7 +4,7 @@
 
 ## Introduction
 
-This reposirtory contains a UDP Proxy for Gran Turismo 7 in order to provide motion to [XSim ](https://www.xsimulator.net/)
+This repository contains a UDP Proxy for Gran Turismo 7 in order to provide motion to [XSim ](https://www.xsimulator.net/)
 This proxy is required as Xsim plugin is not able to decrypt the telemetry packets as they are salsa encoded. Salsa decoding is easy to do in python, so this proxy "subscribes" to Gran Turismo by sending a hearbeat message, receives and decrypts the telemetry data and hten forwards it to the XSim plugin dedicated to Gran Turismo 7.
 
 ``

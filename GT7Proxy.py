@@ -111,7 +111,8 @@ def salsa20_dec(dat):
     oiv = dat[0x40:0x44]
     iv1 = int.from_bytes(oiv, byteorder='little')
     # Notice DEADBEAF, not DEADBEEF
-    iv2 = iv1 ^ 0xDEADBEAF
+    #iv2 = iv1 ^ 0xDEADBEAF
+    iv2 = iv1 ^ 0xDEADBEEF
     IV = bytearray()
     IV.extend(iv2.to_bytes(4, 'little'))
     IV.extend(iv1.to_bytes(4, 'little'))
@@ -123,7 +124,8 @@ def salsa20_dec(dat):
 
 
 def send_hb(s):
-    send_data = 'A'
+    #send_data = 'A'
+    send_data = 'B'
     s.sendto(send_data.encode('utf-8'), (args.ps_ip, args.sendport))
 
 # generic print function
@@ -240,7 +242,7 @@ def get_bit(value, n):
 # start by sending heartbeat to wake-up GT7 telemetry stack
 send_hb(s)
 
-printAt('GT7 Telemetry Display and XSim Proxy 1.7.2 (ctrl-c to quit)', 1, 1, bold=1)
+printAt('GT7 Telemetry Display and XSim Proxy 1.8.0 (ctrl-c to quit)', 1, 1, bold=1)
 printAt('Packet ID:', 1, 73)
 printAt('{:<92}'.format('Current Track Data'), 3, 1, reverse=1, bold=1)
 printAt('Time on track:', 3, 41, reverse=1)
@@ -342,8 +344,7 @@ if args.csvoutput:
     csvwriter = csv.writer(csvfile)
     csvfilexsim = open("GT7dataXsim.csv", 'w')
     csvfilexsim.write(
-        "delta,speed,world_x,world_y,world_z,pitch,yaw,roll,northorientation,world_velocity_x,world_velocity_y,world_velocity_z,local_velo_lateral,local_velo_up,local_velo_forward,accel_x,accel_y,accel_z,slip\n")
-
+        "delta,speed,world_x,world_y,world_z,pitch,yaw,roll,northorientation,world_velocity_x,world_velocity_y,world_velocity_z,local_velo_lateral,local_velo_up,local_velo_forward,sway,heave,surge,slip\n")
 prevlap = -1
 pktid = 0
 pknt = 0
@@ -352,9 +353,6 @@ delta = 0
 udppackets = 0
 lapcounter = LapCounter()
 previous_local_velocity = (0, 0, 0)
-accel_x = 0
-accel_y = 0
-accel_z = 0
 csvheader = True
 seenpacket = False
 slip_angle = 0
@@ -411,11 +409,10 @@ while True:
                     Local_Velocity, previous_local_velocity)
                 previous_local_velocity = Local_Velocity
                 acceleration_vector = np.divide(delta_velocity, sampling_rate)
-                acceleration_vector = np.divide(
-                    acceleration_vector, 9.8)  # Turn into G force
-                accel_x = acceleration_vector[0]
-                accel_y = acceleration_vector[1]
-                accel_z = acceleration_vector[2]
+                acceleration_vector = np.divide(acceleration_vector, 9.8)  # Turn into G force
+                #accel_x = acceleration_vector[0]
+                #accel_y = acceleration_vector[1]
+                #accel_z = acceleration_vector[2]
                 if Local_Velocity[2] != 0 and Local_Velocity[0] != 0:
                     slip_angle = math.degrees(
                         math.atan(Local_Velocity[0] / abs(Local_Velocity[2])))
@@ -423,7 +420,7 @@ while True:
             roll, pitch, yaw = roll_pitch_yaw(Q)
             if args.csvoutput:
                 csvfilexsim.write(
-                    f"{delta.microseconds},{telemetry.speed},{telemetry.position_x},{telemetry.position_y},{telemetry.position_z},{pitch},{yaw},{roll},{telemetry.northorientation},{telemetry.world_velocity_x},{telemetry.world_velocity_y},{-telemetry.world_velocity_z},{Local_Velocity[0]},{Local_Velocity[1]},{Local_Velocity[2]},{accel_x},{accel_y},{accel_z},{slip_angle}\n")
+                    f"{delta.microseconds},{telemetry.speed},{telemetry.position_x},{telemetry.position_y},{telemetry.position_z},{pitch},{yaw},{roll},{telemetry.northorientation},{telemetry.world_velocity_x},{telemetry.world_velocity_y},{-telemetry.world_velocity_z},{Local_Velocity[0]},{Local_Velocity[1]},{Local_Velocity[2]},{telemetry.Sway},{telemetry.Heave},{telemetry.Surge},{slip_angle}\n")
             xsim_packet = TelemetryPacket(PACKET_HEADER,
                                           API_VERSION,
                                           str.encode("PS_GT7"),
@@ -438,9 +435,12 @@ while True:
                                           roll,  # roll in °
                                           yaw,  # yaw in °
                                           pitch,  # pitch in °
-                                          accel_z,  # surge in G
-                                          accel_y,  # heave in G
-                                          accel_x,  # sway in G
+                                          #accel_z,  # surge in G
+                                          #accel_y,  # heave in G
+                                          #accel_x,  # sway in G
+                                          telemetry.Surge,
+                                          telemetry.Heave,
+                                          telemetry.Sway,
                                           slip_angle,  # Traction Loss in °
                                           telemetry.oil_temperature,
                                           telemetry.oil_pressure_bar,
@@ -682,9 +682,9 @@ while True:
                 printAt('{:9.4f}'.format(Local_Velocity[1] * 3.6), 31, 60)
                 # Local velocity  Z
                 printAt('{:9.4f}'.format(Local_Velocity[2] * 3.6), 32, 60)
-                printAt('{:9.4f}'.format(accel_x), 35, 65)  # acceleration X
-                printAt('{:9.4f}'.format(accel_y), 36, 65)  # acceleration Y
-                printAt('{:9.4f}'.format(accel_z), 37, 65)  # acceleration Z
+                printAt('{:9.4f}'.format(telemetry.Sway), 35, 65)  # acceleration X
+                printAt('{:9.4f}'.format(telemetry.Heave), 36, 65)  # acceleration Y
+                printAt('{:9.4f}'.format(telemetry.Surge), 37, 65)  # acceleration Z
                 printAt('{:7.4f}'.format(
                     telemetry.northorientation), 39, 25)  # rot ???
                 printAt('0x8E BITS  =  {:0>8}'.format(

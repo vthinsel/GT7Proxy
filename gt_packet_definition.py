@@ -3,7 +3,7 @@ from struct import unpack
 class GTDataPacket:
     def __init__(self, data):
         ## Format string that allows unpack to process the data bytestream:
-         gt_format = '<ifffffffffffffffccccfffffffffffihhiiihhhhhhBBBcffffffffffffffffffffffffffffffffffffi'
+         gt_format = '<ifffffffffffffffccccfffffffffffihhiiihhhhhhBBBcffffffffffffffffffffffffffffffffffffifffff'
          (self.magic,              #int32
          self.position_x,         #single
          self.position_y,         #single
@@ -87,7 +87,12 @@ class GTDataPacket:
          self.gear_ratio6,        #single
          self.gear_ratio7,        #single
          self.gear_ratio8,        #single
-         self.car_code, #int32
+         self.car_code,             #int32
+         self.WheelRotationRadians, #single
+         self.FillerFloatFB,        #single
+         self.Sway,                 #single
+         self.Heave,                #single
+         self.Surge,                #single
          ) = unpack(gt_format, data)
     def __iter__(self):
         #return iter([self.position_x, self.position_y, self.position_z])
