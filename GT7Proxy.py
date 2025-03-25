@@ -373,7 +373,8 @@ while True:
             pickle.dump(record, f1)
             f2.write(data)
         ddata = salsa20_dec(data)
-        telemetry = GTDataPacket(ddata[0:296])
+        #telemetry = GTDataPacket(ddata[0:296])
+        telemetry = GTDataPacket(ddata[0:316])
         if len(ddata) > 0 and telemetry.pkt_id > pktid:
             pktid = telemetry.pkt_id
             bstlap = telemetry.best_lap_time
